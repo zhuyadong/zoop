@@ -1,5 +1,6 @@
-# [中文](README.CN.md) | [English](README.md) | [Official website](https://zhuyadong.github.io/zoop-docs/en/)
+# [中文](README.CN.md) | [English](README.md) | [Install & Configuration](https://zhuyadong.github.io/zoop-docs/en/guide/install)
 ## Zoop is a Zig OOP solution
+
 
 ## Define Class
 ```zig

@@ -1,5 +1,6 @@
-# [中文](README.CN.md) | [English](README.md) | [官网](https://zhuyadong.github.io/zoop-docs/)
+# [中文](README.CN.md) | [English](README.md) | [安装配置](https://zhuyadong.github.io/zoop-docs/guide/install)
 ## Zoop 是一种 Zig 的 OOP 方案
+
 
 ## 定义类
 ```zig
