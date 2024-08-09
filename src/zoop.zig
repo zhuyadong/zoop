@@ -110,7 +110,7 @@ pub fn DefVtable(comptime I: type, comptime APIs: type) type {
         count += 1;
     }
     for (supers) |super| {
-        const fields = filterFields(directFields(super), iobjfields);
+        const fields = filterFields(directFields(super), allfields[0..count]);
         for (fields, count..) |f, i| {
             allfields[i] = f;
             count += 1;
