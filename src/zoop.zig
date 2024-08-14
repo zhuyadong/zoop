@@ -74,6 +74,7 @@ pub const IObject = struct {
     pub const Vtable = struct {
         __meta__: *const fn (*anyopaque) *MetaInfo,
         destroy: *const fn (*anyopaque) void,
+        formatAny: *const fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void,
     };
     pub usingnamespace CoreApi(@This());
 
@@ -213,9 +214,7 @@ pub fn Mixin(comptime T: type) type {
             _: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            var buf: [512]u8 = undefined;
-            const msg = try std.fmt.bufPrint(&buf, "{s}@{x}{{{any}}} ", .{ @typeName(Self), @intFromPtr(self), self.meta });
-            try writer.writeAll(msg);
+            try writer.print("{s}@{x}{{{any}}} ", .{ @typeName(Self), @intFromPtr(self), self.meta });
         }
     };
 }
@@ -477,16 +476,9 @@ fn CoreFn(comptime Class: type) type {
             }
         },
         struct {
-            pub fn format(
-                self: *const Class,
-                comptime _: []const u8,
-                _: std.fmt.FormatOptions,
-                writer: anytype,
-            ) !void {
+            pub fn formatAny(self: *const Class, writer: std.io.AnyWriter) anyerror!void {
                 if (self.mixin.meta == null) @panic("obj create by make() must call obj.initMixin() before use it.");
-                var buf: [512]u8 = undefined;
-                const msg = try std.fmt.bufPrint(&buf, "{X}:{s}", .{ @intFromPtr(self), @typeName(Class) });
-                try writer.writeAll(msg);
+                try writer.print("{X}:{s}", .{ @intFromPtr(self), @typeName(Class) });
             }
         },
     });
@@ -521,15 +513,23 @@ fn CoreApi(comptime I: type) type {
             self.vptr.destroy(self.ptr);
         }
 
+        pub fn formatAny(self: I, writer: std.io.AnyWriter) anyerror!void {
+            try self.vptr.formatAny(self.ptr, writer);
+        }
+
         pub fn format(
             self: I,
             comptime _: []const u8,
             _: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            var buf: [512]u8 = undefined;
-            const msg = try std.fmt.bufPrint(&buf, "{X}:{s}{{{s} vptr@{X}}}", .{ @intFromPtr(self.ptr), @typeName(I), metaInfo(self).typename(), @intFromPtr(self.vptr) });
-            try writer.writeAll(msg);
+            try writer.print("{X}:{s}{{vptr@{X} ", .{ @intFromPtr(self.ptr), @typeName(I), @intFromPtr(self.vptr) });
+            if (@TypeOf(writer) == std.io.AnyWriter) {
+                try self.formatAny(writer);
+            } else {
+                try self.formatAny(writer.any());
+            }
+            try writer.writeAll("}");
         }
     };
 }
@@ -638,7 +638,7 @@ fn ApiInfoList(comptime len: usize) type {
             writer: anytype,
         ) !void {
             for (self.items[0..self.idx]) |item| {
-                try writer.writeAll(compfmt("> {s}.{s} : {}\n", .{ @typeName(item.iface), item.name, @TypeOf(@field(item.iface, item.name)) }));
+                try writer.print("> {s}.{s} : {}\n", .{ @typeName(item.iface), item.name, @TypeOf(@field(item.iface, item.name)) });
             }
         }
     };
