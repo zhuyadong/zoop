@@ -855,7 +855,7 @@ fn getSuperPtrFunc(comptime T: type) SuperPtrFunc {
     comptime var kvs: [tuple.len(all_supers) + 1]KV = undefined;
     kvs[0] = .{ .typeid = makeTypeId(T), .offset = @as(usize, 0) };
     inline for (all_supers.value, 1..) |super, i| {
-        kvs[i] = .{ .typeid = typeId(super), .offset = ptrOffset(T, SuperRoute(T, super)) };
+        kvs[i] = .{ .typeid = makeTypeId(super), .offset = ptrOffset(T, SuperRoute(T, super)) };
     }
     return (struct {
         pub fn func(self: *anyopaque, typeid: u32) ?*anyopaque {
