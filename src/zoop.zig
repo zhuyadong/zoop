@@ -481,6 +481,20 @@ fn CoreFn(comptime Class: type) type {
                 try writer.print("{X}:{s}", .{ @intFromPtr(self), @typeName(Class) });
             }
         },
+        struct {
+            pub fn format(
+                self: *const Class,
+                comptime _: []const u8,
+                _: std.fmt.FormatOptions,
+                writer: anytype,
+            ) !void {
+                if (@TypeOf(writer) == std.io.AnyWriter) {
+                    try self.as(IObject).?.formatAny(writer);
+                } else {
+                    try self.as(IObject).?.formatAny(writer.any());
+                }
+            }
+        },
     });
 }
 
