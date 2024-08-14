@@ -11,12 +11,13 @@ const zoop = @This();
 pub const tuple = @import("tuple.zig");
 pub const Method = tuple.Init;
 
-pub const VtableFunc = *const fn (ifacename: []const u8) ?*IObject.Vtable;
-pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typename: []const u8) ?*anyopaque;
+pub const VtableFunc = *const fn (typeid: u32) ?*IObject.Vtable;
+pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typeid: u32) ?*anyopaque;
 
 /// The data used for type conversions
 pub const TypeInfo = struct {
     typename: []const u8,
+    typeid: u32,
 
     /// return vtable by interface name
     getVtable: VtableFunc,
@@ -26,7 +27,7 @@ pub const TypeInfo = struct {
     /// return pointer to T's TypeInfo
     pub fn of(comptime T: type) *const TypeInfo {
         return &(struct {
-            pub const info = TypeInfo{ .typename = @typeName(T), .getVtable = getVtableFunc(T), .getSuperPtr = getSuperPtrFunc(T) };
+            pub const info = TypeInfo{ .typename = @typeName(T), .typeid = makeTypeId(T), .getVtable = getVtableFunc(T), .getSuperPtr = getSuperPtrFunc(T) };
         }).info;
     }
 };
@@ -45,11 +46,11 @@ pub const MetaInfo = packed struct {
         assert(self.rootptr != null and self.typeinfo != null);
         if (isInterface(T)) {
             assert(self.typeinfo != null);
-            if (self.typeinfo.?.getVtable(@typeName(T))) |vptr| {
+            if (self.typeinfo.?.getVtable(typeId(T))) |vptr| {
                 return makeFatPtr(T, self.rootptr.?, vptr);
             }
         } else {
-            if (self.typeinfo.?.getSuperPtr(self.rootptr.?, mixinName(T))) |ptr| {
+            if (self.typeinfo.?.getSuperPtr(self.rootptr.?, typeId(T))) |ptr| {
                 return @ptrCast(@alignCast(ptr));
             }
         }
@@ -273,6 +274,10 @@ pub fn typeInfo(any: anytype) *const TypeInfo {
     } else {
         return metaInfo(any).typeinfo.?;
     }
+}
+
+pub fn typeId(any: anytype) u32 {
+    return typeInfo(any).typeid;
 }
 
 /// Returns MetaInfo of interface or object
@@ -828,18 +833,17 @@ inline fn ptrOffset(comptime T: type, comptime route_tuple: anytype) usize {
 /// Returns the function for T that is used to get Vtable by interface type name.
 fn getVtableFunc(comptime T: type) VtableFunc {
     const ifaces = tuple.Append(.{IObject}, Interfaces(T)).value;
-    const kvs = comptime build_kvs: {
-        const KV = struct { []const u8, *IObject.Vtable };
-        var kvs_array: [ifaces.len]KV = undefined;
-        for (ifaces, 0..) |iface, i| {
-            kvs_array[i] = .{ @typeName(iface), @ptrCast(makeVtable(T, RealVtable(iface))) };
-        }
-        break :build_kvs kvs_array[0..];
-    };
-    const map = std.StaticStringMap(*IObject.Vtable).initComptime(kvs);
-    return &(struct {
-        pub fn func(ifacename: []const u8) ?*IObject.Vtable {
-            return map.get(ifacename);
+    const KV = struct { typeid: u32, vtable: *IObject.Vtable };
+    comptime var kvs: [ifaces.len]KV = undefined;
+    inline for (ifaces, 0..) |iface, i| {
+        kvs[i] = .{ .typeid = makeTypeId(iface), .vtable = @ptrCast(makeVtable(T, RealVtable(iface))) };
+    }
+    return (struct {
+        pub fn func(typeid: u32) ?*IObject.Vtable {
+            for (kvs) |kv| {
+                if (kv.typeid == typeid) return kv.vtable;
+            }
+            return null;
         }
     }).func;
 }
@@ -847,20 +851,18 @@ fn getVtableFunc(comptime T: type) VtableFunc {
 /// Returns the function for T that is used to get super pointer by super type name.
 fn getSuperPtrFunc(comptime T: type) SuperPtrFunc {
     const all_supers = SuperClasses(T);
-    const kvs = comptime build_kvs: {
-        const KV = struct { []const u8, usize };
-        var kvs_array: [tuple.len(all_supers) + 1]KV = undefined;
-        kvs_array[0] = .{ mixinName(T), @as(usize, 0) };
-        for (all_supers.value, 1..) |super, i| {
-            kvs_array[i] = .{ mixinName(super), ptrOffset(T, SuperRoute(T, super)) };
-        }
-        break :build_kvs kvs_array[0..];
-    };
-    const map = std.StaticStringMap(usize).initComptime(kvs);
+    const KV = struct { typeid: u32, offset: usize };
+    comptime var kvs: [tuple.len(all_supers) + 1]KV = undefined;
+    kvs[0] = .{ .typeid = makeTypeId(T), .offset = @as(usize, 0) };
+    inline for (all_supers.value, 1..) |super, i| {
+        kvs[i] = .{ .typeid = typeId(super), .offset = ptrOffset(T, SuperRoute(T, super)) };
+    }
     return (struct {
-        pub fn func(self: *anyopaque, mixinname: []const u8) ?*anyopaque {
-            if (map.get(mixinname)) |offset| {
-                return @ptrFromInt(@intFromPtr(self) + offset);
+        pub fn func(self: *anyopaque, typeid: u32) ?*anyopaque {
+            for (kvs) |kv| {
+                if (kv.typeid == typeid) {
+                    return @ptrFromInt(@intFromPtr(self) + kv.offset);
+                }
             }
 
             return null;
@@ -873,6 +875,10 @@ fn makeFatPtr(comptime I: type, ptr: *anyopaque, vptr: *const anyopaque) I {
         return I{ .ptr = ptr, .vptr = @ptrCast(@alignCast(@constCast(vptr))) };
     }
     @compileError(@typeName(I) ++ " is not fatptr type.");
+}
+
+fn makeTypeId(comptime T: type) u32 {
+    return @intCast(@intFromError(@field(anyerror, "#" ++ @typeName(T))));
 }
 
 test "zoop" {
