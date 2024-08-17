@@ -481,7 +481,7 @@ fn CoreFn(comptime Class: type) type {
                 if (isRootPtr(self)) {
                     self.__destroy__();
                 } else {
-                    self.as(IObject).?.destroy();
+                    self.as(IObject).?.__destroy__();
                 }
             }
         },
