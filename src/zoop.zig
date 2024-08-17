@@ -73,6 +73,7 @@ pub const MetaInfo = packed struct {
 pub const IObject = struct {
     pub const Vtable = struct {
         __meta__: *const fn (*anyopaque) *MetaInfo,
+        __destroy__: *const fn (*anyopaque) void,
         destroy: *const fn (*anyopaque) void,
         formatAny: *const fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void,
     };
@@ -470,9 +471,18 @@ fn CoreFn(comptime Class: type) type {
             }
         },
         struct {
+            pub fn __destroy__(self: *Class) void {
+                destroyObj(self);
+            }
+        },
+        struct {
             pub fn destroy(self: *Class) void {
                 if (self.mixin.meta == null) @panic("obj create by make() must call obj.initMixin() before use it.");
-                destroyObj(self);
+                if (isRootPtr(self)) {
+                    self.__destroy__();
+                } else {
+                    self.as(IObject).?.destroy();
+                }
             }
         },
         struct {
@@ -503,6 +513,10 @@ fn CoreApi(comptime I: type) type {
     return struct {
         pub fn __meta__(self: I) *MetaInfo {
             return self.vptr.__meta__(self.ptr);
+        }
+
+        pub fn __destroy__(self: I) void {
+            self.vptr.__destroy__(self.ptr);
         }
 
         pub fn as(self: I, comptime T: type) t: {
