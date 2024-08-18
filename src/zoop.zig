@@ -11,17 +11,18 @@ const zoop = @This();
 pub const tuple = @import("tuple.zig");
 pub const Method = tuple.Init;
 
-pub const VtableFunc = *const fn (typeid: u32) ?*IObject.Vtable;
-pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typeid: u32) ?*anyopaque;
+pub const VtableFunc = *const fn (typeid: type_id) ?*IObject.Vtable;
+pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typeid: type_id) ?*anyopaque;
+pub const type_id = u32;
 
 /// The data used for type conversions
 pub const TypeInfo = struct {
     typename: []const u8,
-    typeid: u32,
+    typeid: type_id,
 
-    /// return vtable by interface name
+    /// return vtable by interface type_id
     getVtable: VtableFunc,
-    /// return pointer to the parent class data by parent class name
+    /// return pointer to the parent class data by parent class type_id
     getSuperPtr: SuperPtrFunc,
 
     /// return pointer to T's TypeInfo
@@ -276,7 +277,7 @@ pub fn typeInfo(any: anytype) *const TypeInfo {
     }
 }
 
-pub fn typeId(any: anytype) u32 {
+pub fn typeId(any: anytype) type_id {
     return typeInfo(any).typeid;
 }
 
@@ -861,13 +862,13 @@ inline fn ptrOffset(comptime T: type, comptime route_tuple: anytype) usize {
 /// Returns the function for T that is used to get Vtable by interface type name.
 fn getVtableFunc(comptime T: type) VtableFunc {
     const ifaces = tuple.Append(.{IObject}, Interfaces(T)).value;
-    const KV = struct { typeid: u32, vtable: *IObject.Vtable };
+    const KV = struct { typeid: type_id, vtable: *IObject.Vtable };
     comptime var kvs: [ifaces.len]KV = undefined;
     inline for (ifaces, 0..) |iface, i| {
         kvs[i] = .{ .typeid = makeTypeId(iface), .vtable = @ptrCast(makeVtable(T, RealVtable(iface))) };
     }
     return (struct {
-        pub fn func(typeid: u32) ?*IObject.Vtable {
+        pub fn func(typeid: type_id) ?*IObject.Vtable {
             for (kvs) |kv| {
                 if (kv.typeid == typeid) return kv.vtable;
             }
@@ -879,14 +880,14 @@ fn getVtableFunc(comptime T: type) VtableFunc {
 /// Returns the function for T that is used to get super pointer by super type name.
 fn getSuperPtrFunc(comptime T: type) SuperPtrFunc {
     const all_supers = SuperClasses(T);
-    const KV = struct { typeid: u32, offset: usize };
+    const KV = struct { typeid: type_id, offset: usize };
     comptime var kvs: [tuple.len(all_supers) + 1]KV = undefined;
     kvs[0] = .{ .typeid = makeTypeId(T), .offset = @as(usize, 0) };
     inline for (all_supers.value, 1..) |super, i| {
         kvs[i] = .{ .typeid = makeTypeId(super), .offset = ptrOffset(T, SuperRoute(T, super)) };
     }
     return (struct {
-        pub fn func(self: *anyopaque, typeid: u32) ?*anyopaque {
+        pub fn func(self: *anyopaque, typeid: type_id) ?*anyopaque {
             for (kvs) |kv| {
                 if (kv.typeid == typeid) {
                     return @ptrFromInt(@intFromPtr(self) + kv.offset);
@@ -905,7 +906,7 @@ fn makeFatPtr(comptime I: type, ptr: *anyopaque, vptr: *const anyopaque) I {
     @compileError(@typeName(I) ++ " is not fatptr type.");
 }
 
-fn makeTypeId(comptime T: type) u32 {
+fn makeTypeId(comptime T: type) type_id {
     return @intCast(@intFromError(@field(anyerror, "#" ++ @typeName(T))));
 }
 
