@@ -13,7 +13,7 @@ pub const Method = tuple.Init;
 
 pub const VtableFunc = *const fn (typeid: type_id) ?*IObject.Vtable;
 pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typeid: type_id) ?*anyopaque;
-pub const type_id = u32;
+pub const type_id = *const anyopaque;
 
 /// The data used for type conversions
 pub const TypeInfo = struct {
@@ -907,7 +907,9 @@ fn makeFatPtr(comptime I: type, ptr: *anyopaque, vptr: *const anyopaque) I {
 }
 
 fn makeTypeId(comptime T: type) type_id {
-    return @intCast(@intFromError(@field(anyerror, "#" ++ @typeName(T))));
+    return @ptrCast(&(struct {
+        pub const val: ?T = null;
+    }).val);
 }
 
 test "zoop" {
