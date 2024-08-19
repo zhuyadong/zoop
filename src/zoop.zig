@@ -908,7 +908,7 @@ fn makeFatPtr(comptime I: type, ptr: *anyopaque, vptr: *const anyopaque) I {
 
 fn makeTypeId(comptime T: type) type_id {
     return @ptrCast(&(struct {
-        pub const val: ?T = null;
+        pub const val: ?*T = null;
     }).val);
 }
 
