@@ -237,7 +237,7 @@ pub fn DirectSuperClasses(comptime Self: type) type {
     comptime var ret = tuple.Init(.{});
     if (@hasDecl(Self, "extends")) {
         inline for (Self.extends) |super| {
-            if (!isInterface(super)) {
+            if (isClass(super)) {
                 ret = tuple.Append(ret, super);
             }
         }
