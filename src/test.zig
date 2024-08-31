@@ -333,6 +333,11 @@ test "NickRobot" {
     try t.expect(zoop.typeInfo(&nick) == zoop.typeInfo(NickRobot));
     try t.expect(zoop.typeInfo(&nick) == zoop.typeInfo(nick.as(IObject).?));
     try t.expectEqualStrings(zoop.metaInfo(&nick).typename(), @typeName(NickRobot));
+
+    var iobj: IObject = nick.cast(IObject);
+    try t.expect(!iobj.isNil());
+    iobj.setNil();
+    try t.expect(iobj.isNil());
 }
 
 pub fn main() !void {}

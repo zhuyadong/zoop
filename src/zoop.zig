@@ -15,6 +15,18 @@ pub const VtableFunc = *const fn (typeid: type_id) ?*IObject.Vtable;
 pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typeid: type_id) ?*anyopaque;
 pub const type_id = *const anyopaque;
 
+pub const Nil = struct {
+    const payload: [0]u8 = undefined;
+
+    pub fn ptr() *anyopaque {
+        return payload[0..].ptr;
+    }
+
+    pub fn of(comptime I: type) I {
+        return .{ .ptr = @ptrCast(ptr()), .vptr = @ptrCast(ptr()) };
+    }
+};
+
 /// The data used for type conversions
 pub const TypeInfo = struct {
     typename: []const u8,
@@ -536,6 +548,19 @@ fn CoreApi(comptime I: type) type {
 
         pub fn eql(self: I, other: I) bool {
             return self.ptr == other.ptr and self.vptr == other.vptr;
+        }
+
+        pub fn nil() I {
+            return Nil.of(I);
+        }
+
+        pub fn isNil(self: I) bool {
+            return self.ptr == Nil.ptr();
+        }
+
+        pub fn setNil(self: *I) void {
+            self.ptr = @ptrFromInt(@intFromPtr(Nil.ptr()));
+            self.vptr = @ptrFromInt(@intFromPtr(Nil.ptr()));
         }
 
         pub fn destroy(self: I) void {
