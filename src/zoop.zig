@@ -209,6 +209,7 @@ pub fn Mixin(comptime T: type) type {
             pself.meta = if (isroot) MetaInfo.init(tptr) else castinfo.?;
             inline for (comptime DirectSuperClasses(T).value) |m| {
                 var inner = &@field(pself.data, mixinName(m));
+                inner.* = makeStruct(m);
                 inner.mixin.init(pself.meta);
             }
         }
@@ -553,7 +554,7 @@ fn CoreApi(comptime I: type) type {
             return Nil.of(I);
         }
 
-        pub fn isNil(self: I) bool {
+        pub fn isNil(self: *const I) bool {
             return self.ptr == Nil.ptr();
         }
 
