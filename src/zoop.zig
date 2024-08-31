@@ -559,8 +559,7 @@ fn CoreApi(comptime I: type) type {
         }
 
         pub fn setNil(self: *I) void {
-            self.ptr = Nil.ptr();
-            self.vptr = @alignCast(@ptrCast(Nil.ptr()));
+            self.* = nil();
         }
 
         pub fn destroy(self: I) void {
