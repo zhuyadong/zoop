@@ -16,14 +16,13 @@ pub const SuperPtrFunc = *const fn (rootptr: *anyopaque, typeid: type_id) ?*anyo
 pub const type_id = *const anyopaque;
 
 pub const Nil = struct {
-    const payload: [0]u8 = undefined;
-
+    const payload: usize = 0;
     pub fn ptr() *anyopaque {
-        return payload[0..].ptr;
+        return @ptrCast(@constCast(&payload));
     }
 
     pub fn of(comptime I: type) I {
-        return .{ .ptr = @ptrCast(ptr()), .vptr = @ptrCast(ptr()) };
+        return .{ .ptr = @ptrCast(ptr()), .vptr = @alignCast(@ptrCast(ptr())) };
     }
 };
 
@@ -559,8 +558,8 @@ fn CoreApi(comptime I: type) type {
         }
 
         pub fn setNil(self: *I) void {
-            self.ptr = @ptrFromInt(@intFromPtr(Nil.ptr()));
-            self.vptr = @ptrFromInt(@intFromPtr(Nil.ptr()));
+            self.ptr = Nil.ptr();
+            self.vptr = @alignCast(@ptrCast(Nil.ptr()));
         }
 
         pub fn destroy(self: I) void {

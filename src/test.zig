@@ -338,6 +338,7 @@ test "NickRobot" {
     try t.expect(!iobj.isNil());
     iobj.setNil();
     try t.expect(iobj.isNil());
+    try t.expect(iobj.eql(IObject.nil()));
 }
 
 pub fn main() !void {}
