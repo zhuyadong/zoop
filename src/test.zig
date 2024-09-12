@@ -91,7 +91,16 @@ test "zoop" {
     var custom = zoop.make(Custom, null);
     custom.ptr().init("sub");
     ihuman = zoop.as(zoop.as(&custom, zoop.IObject).?, IHuman).?;
+    try t.expect(zoop.isRootPtr(&custom));
+    try t.expect(zoop.isRootPtr(custom.ptr()));
+    try t.expect(!zoop.isRootPtr(&custom.ptr().super));
+    try t.expect(!zoop.isRootPtr(zoop.Klass(Sub).from(&custom.ptr().super)));
     try t.expectEqualStrings(custom.ptr().super.super.getName(), "sub");
+    try t.expectEqualStrings(zoop.cast(&custom, Human).name, "sub");
+    try t.expectEqualStrings(zoop.cast(custom.ptr(), Human).name, "sub");
+    try t.expectEqualStrings(zoop.as(&custom, Human).?.name, "sub");
+    try t.expectEqualStrings(zoop.as(custom.ptr(), Human).?.name, "sub");
+    try t.expectEqualStrings(zoop.getField(&custom, "name", []const u8).*, "sub");
     try t.expectEqualStrings(ihuman.getName(), "custom");
 
     // test deinit()

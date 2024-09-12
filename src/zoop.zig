@@ -261,6 +261,18 @@ pub fn typeInfo(any: anytype) *const TypeInfo {
         const head: *VtableHeader = @ptrCast(@alignCast(any.vptr));
         return head.getTypeInfo();
     } else {
+        switch (@typeInfo(T)) {
+            else => {},
+            .Pointer => |p| {
+                if (p.size == .One) {
+                    if (isKlassType(p.child)) {
+                        return any.header.getTypeInfo();
+                    } else if (isClassType(p.child)) {
+                        return Klass(p.child).from(any).header.getTypeInfo();
+                    }
+                }
+            },
+        }
         return makeTypeInfo(@TypeOf(any));
     }
 }
@@ -309,6 +321,16 @@ pub fn vptr(iface: anytype) t: {
     break :t *const Vtable(@TypeOf(iface));
 } {
     return @ptrCast(@alignCast(iface.vptr));
+}
+
+pub fn isRootPtr(ptr: anytype) bool {
+    const T = std.meta.Child(@TypeOf(ptr));
+    if (isClassType(T)) {
+        return typeInfo(ptr) == makeTypeInfo(T);
+    } else if (isKlassType(T)) {
+        return typeInfo(ptr.ptr()) == makeTypeInfo(std.meta.Child(@TypeOf(ptr.ptr())));
+    }
+    @compileError(compfmt("{s} is not a class/klass.", .{@typeName(T)}));
 }
 
 pub fn cast(any: anytype, comptime T: type) t: {
@@ -427,16 +449,6 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
 }
 
 //===== private content ======
-fn StackBuf(comptime N: usize) type {
-    return struct {
-        buf: [N]u8 = undefined,
-        pub fn print(self: *const @This(), comptime fmt: []const u8, args: anytype) []const u8 {
-            var this = @constCast(self);
-            return std.fmt.bufPrint(&this.buf, fmt, args) catch @panic("FMT ERROR");
-        }
-    };
-}
-
 const VtableHeader = struct {
     getTypeInfo: *const TypeInfoGetFunc,
 };
@@ -463,25 +475,26 @@ fn formatFunc(comptime T: type) *const FormatFunc {
     return (struct {
         pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
             const self: *T = @ptrCast(@alignCast(pself));
-            try writer.print("{}", .{self});
+            try writer.print("{any}", .{self});
         }
     }).func;
 }
 
-fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
-    comptime {
+inline fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
+    const offset: usize = comptime blk: {
         const supers = classes(T);
         for (supers.items) |V| {
             if (@hasField(V, name)) {
                 if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
                     const pv: *allowzero V = @ptrFromInt(0);
                     const pf = &@field(pv, name);
-                    return @intFromPtr(pf);
+                    break :blk @intFromPtr(pf);
                 }
             }
         }
         @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
-    }
+    };
+    return offset;
 }
 
 fn classChecker(comptime T: type) ?*const ClassCheckFunc {
@@ -633,7 +646,7 @@ fn interfaces(comptime T: type) Tuple {
                     if (s.is_tuple) {
                         inline for (extends) |iface| {
                             if (isInterfaceType(iface)) {
-                                ret = tupleAppend(ret, interfaces(iface));
+                                ret = tupleAppendUnique(ret, interfaces(iface));
                             } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
                         }
                     }
