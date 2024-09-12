@@ -3,20 +3,28 @@ const StructField = std.builtin.Type.StructField;
 const FieldType = std.meta.FieldType;
 const FieldEnum = std.meta.FieldEnum;
 const Tuple = type;
+const nameCast = std.enums.nameCast;
 const compfmt = std.fmt.comptimePrint;
 const assert = std.debug.assert;
+const zoop = @This();
 
 //===== public content ======
 pub const type_id = *const anyopaque;
 pub const VtableGetFunc = fn (iface_id: type_id) ?*anyopaque;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
 pub const TypeInfoGetFunc = fn () *const TypeInfo;
+pub const FormatFunc = fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void;
+
+pub const HookFunc = *const fn (obj: IObject) void;
+var destroy_hook_func: ?HookFunc = null;
+var new_hook_func: ?HookFunc = null;
 
 pub const TypeInfo = struct {
     typename: []const u8,
     typeid: type_id,
     getVtable: ?*const VtableGetFunc,
     isClass: ?*const ClassCheckFunc,
+    format: *const FormatFunc,
 };
 
 pub const Nil = struct {
@@ -33,7 +41,71 @@ pub const Nil = struct {
 pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
+    pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        zoop.format(self, writer);
+    }
 };
+
+/// Set up hooks to monitor the creation and destruction of objects on the heap
+pub fn setHook(new_hook: ?HookFunc, destroy_hook: ?HookFunc) void {
+    new_hook_func = new_hook;
+    destroy_hook_func = destroy_hook;
+}
+
+/// get field of special type from any's inherit tree
+pub fn getField(any: anytype, comptime name: []const u8, comptime T: type) *T {
+    const V = @TypeOf(any);
+    switch (@typeInfo(V)) {
+        else => @compileError(compfmt("zoop.getField(any): any must be a pointer to class/klass", .{})),
+        .Pointer => |p| {
+            if (isKlassType(p.child)) return getField(any.ptr(), name, T);
+            if (isClassType(p.child)) {
+                const offset = fieldOffset(p.child, name, T);
+                return @ptrFromInt(@intFromPtr(any) + offset);
+            }
+        },
+    }
+}
+
+pub fn MethodType(comptime T: type, comptime name: []const u8) type {
+    comptime {
+        var Cur = T;
+        while (Cur != void) {
+            if (@hasDecl(Cur, name)) {
+                const FT = @TypeOf(@field(Cur, name));
+                if (@typeInfo(FT) == .Fn) {
+                    return FT;
+                }
+            }
+            const fields = @typeInfo(Cur).Struct.fields;
+            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+                Cur = fields[0].type;
+            } else {
+                Cur = void;
+            }
+        }
+        return void;
+    }
+}
+
+pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
+    comptime var Cur = T;
+    while (Cur != void) {
+        if (@hasDecl(Cur, name)) {
+            const FT = @TypeOf(@field(Cur, name));
+            if (@typeInfo(FT) == .Fn) {
+                return @field(Cur, name);
+            }
+        }
+        const fields = @typeInfo(Cur).Struct.fields;
+        if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+            Cur = fields[0].type;
+        } else {
+            Cur = void;
+        }
+    }
+    return void;
+}
 
 pub fn Klass(comptime T: type) type {
     if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.", .{@typeName(T)}));
@@ -53,6 +125,9 @@ pub fn Klass(comptime T: type) type {
         pub fn new(allocator: std.mem.Allocator) !*@This() {
             var self = try allocator.create(@This());
             self.header = .{ .getTypeInfo = typeInfoGetter(T), .deallocator = allocator, .deinit = @ptrCast(&deinit) };
+            if (new_hook_func) |func| {
+                func(cast(self.ptr(), IObject));
+            }
             return self;
         }
 
@@ -83,6 +158,9 @@ pub fn Klass(comptime T: type) type {
                 }
             }
             if (self.header.deallocator) |dtor| {
+                if (destroy_hook_func) |func| {
+                    func(cast(self.ptr(), IObject));
+                }
                 dtor.destroy(self);
             }
         }
@@ -323,6 +401,31 @@ pub fn isNil(any: anytype) bool {
     return any.ptr == Nil.ptr();
 }
 
+pub fn format(any: anytype, writer: anytype) anyerror!void {
+    const typeinfo = typeInfo(any);
+    const anywriter = if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any();
+    const ptr: *anyopaque = blk: {
+        const T = @TypeOf(any);
+        switch (@typeInfo(T)) {
+            else => @compileError("zoop.format(any): any must be interface/*class/*klass."),
+            .Struct => {
+                if (isInterfaceType(T)) {
+                    break :blk any.ptr;
+                } else @compileError("zoop.format(any): any must be interface/*class/*klass.");
+            },
+            .Pointer => |p| switch (p.size) {
+                else => @compileError("zoop.format(any): any must be interface/*class/*klass."),
+                .One => {
+                    if (isKlassType(p.child)) break :blk @ptrCast(any.ptr());
+                    if (isClassType(p.child)) break :blk @ptrCast(any);
+                    @compileError("zoop.format(any): any must be interface/*class/*klass.");
+                },
+            },
+        }
+    };
+    try typeinfo.format(ptr, anywriter);
+}
+
 //===== private content ======
 fn StackBuf(comptime N: usize) type {
     return struct {
@@ -356,6 +459,31 @@ fn vtableGetter(comptime T: type) ?*const VtableGetFunc {
     }).func;
 }
 
+fn formatFunc(comptime T: type) *const FormatFunc {
+    return (struct {
+        pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
+            const self: *T = @ptrCast(@alignCast(pself));
+            try writer.print("{}", .{self});
+        }
+    }).func;
+}
+
+fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
+    comptime {
+        const supers = classes(T);
+        for (supers.items) |V| {
+            if (@hasField(V, name)) {
+                if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
+                    const pv: *allowzero V = @ptrFromInt(0);
+                    const pf = &@field(pv, name);
+                    return @intFromPtr(pf);
+                }
+            }
+        }
+        @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
+    }
+}
+
 fn classChecker(comptime T: type) ?*const ClassCheckFunc {
     if (!isClassType(T)) return null;
     return (struct {
@@ -375,6 +503,7 @@ inline fn makeTypeInfo(comptime T: type) *const TypeInfo {
             .typeid = makeTypeId(T),
             .getVtable = vtableGetter(T),
             .isClass = classChecker(T),
+            .format = formatFunc(T),
         };
     }).info;
 }
@@ -460,46 +589,6 @@ inline fn isKlassType(comptime T: type) bool {
         return @hasDecl(T, "#klass");
     }
     return false;
-}
-
-fn MethodType(comptime T: type, comptime name: []const u8) type {
-    comptime {
-        var Cur = T;
-        while (Cur != void) {
-            if (@hasDecl(Cur, name)) {
-                const FT = @TypeOf(@field(Cur, name));
-                if (@typeInfo(FT) == .Fn) {
-                    return FT;
-                }
-            }
-            const fields = @typeInfo(Cur).Struct.fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
-                Cur = fields[0].type;
-            } else {
-                Cur = void;
-            }
-        }
-        return void;
-    }
-}
-
-fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
-    comptime var Cur = T;
-    while (Cur != void) {
-        if (@hasDecl(Cur, name)) {
-            const FT = @TypeOf(@field(Cur, name));
-            if (@typeInfo(FT) == .Fn) {
-                return @field(Cur, name);
-            }
-        }
-        const fields = @typeInfo(Cur).Struct.fields;
-        if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
-            Cur = fields[0].type;
-        } else {
-            Cur = void;
-        }
-    }
-    return void;
 }
 
 inline fn isTuple(any: anytype) bool {
