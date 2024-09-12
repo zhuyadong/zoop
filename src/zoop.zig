@@ -42,7 +42,7 @@ pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
     pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        zoop.format(self, writer);
+        zoop.format(self.*, writer);
     }
 };
 
@@ -114,7 +114,7 @@ pub fn Klass(comptime T: type) type {
     const Header = struct {
         getTypeInfo: *const TypeInfoGetFunc,
         deinit: *const fn (*anyopaque) void,
-        deallocator: ?std.mem.Allocator = null,
+        allocator: ?std.mem.Allocator = null,
         magic: u32 = kmagic,
     };
     return struct {
@@ -124,7 +124,7 @@ pub fn Klass(comptime T: type) type {
 
         pub fn new(allocator: std.mem.Allocator, init: ?T) !*@This() {
             var self = try allocator.create(@This());
-            self.header = .{ .getTypeInfo = typeInfoGetter(T), .deallocator = allocator, .deinit = @ptrCast(&deinit) };
+            self.header = .{ .getTypeInfo = typeInfoGetter(T), .allocator = allocator, .deinit = @ptrCast(&deinit) };
             if (init) |v| {
                 self.class = v;
             } else {
@@ -144,6 +144,9 @@ pub fn Klass(comptime T: type) type {
             } else {
                 initClass(&self.class);
             }
+            if (new_hook_func) |func| {
+                func(cast(self.ptr(), IObject));
+            }
             return self;
         }
 
@@ -160,16 +163,16 @@ pub fn Klass(comptime T: type) type {
         fn deinit(self: *@This()) void {
             assert(self.header.magic == kmagic);
             assert(self.header.getTypeInfo == typeInfoGetter(T));
+            if (destroy_hook_func) |func| {
+                func(cast(self.ptr(), IObject));
+            }
             inline for (classes(T).items) |V| {
                 if (@hasDecl(V, "deinit")) {
                     var p: *V = @ptrCast(self.ptr());
                     p.deinit();
                 }
             }
-            if (self.header.deallocator) |dtor| {
-                if (destroy_hook_func) |func| {
-                    func(cast(self.ptr(), IObject));
-                }
+            if (self.header.allocator) |dtor| {
                 dtor.destroy(self);
             }
         }
@@ -299,26 +302,27 @@ pub fn new(allocator: std.mem.Allocator, comptime T: type, init: ?T) !*T {
 pub fn destroy(any: anytype) void {
     const T = @TypeOf(any);
     if (isInterfaceType(T)) {
-        var pclass = Klass(struct {}).from(@ptrCast(@alignCast(any.ptr)));
-        pclass.header.deinit(@ptrCast(pclass));
+        var klass = Klass(struct {}).from(@ptrCast(@alignCast(any.ptr)));
+        return klass.header.deinit(@ptrCast(klass));
     } else {
         switch (@typeInfo(T)) {
-            else => @compileError(compfmt("'{s}' is not a pointer to class/klass.", .{@typeName(@TypeOf(any))})),
+            else => {},
             .Pointer => |p| {
                 switch (p.size) {
-                    else => @compileError(compfmt("'{s}' is not a pointer to class/klass.", .{@typeName(@TypeOf(any))})),
+                    else => {},
                     .One => {
                         if (isKlassType(p.child)) {
-                            any.header.deinit(@ptrCast(any));
+                            return any.header.deinit(@ptrCast(any));
                         } else if (isClassType(p.child)) {
-                            var self = Klass(p.child).from(any);
-                            self.header.deinit(@ptrCast(self));
-                        } else @compileError(compfmt("'{s}' is not a pointer to class/klass.", .{@typeName(@TypeOf(any))}));
+                            var klass = Klass(p.child).from(any);
+                            return klass.header.deinit(@ptrCast(klass));
+                        }
                     },
                 }
             },
         }
     }
+    @compileError(compfmt("'{s}' is not a pointer to class/klass.", .{@typeName(@TypeOf(any))}));
 }
 
 pub fn make(comptime T: type, init: ?T) Klass(T) {
@@ -340,6 +344,28 @@ pub fn isRootPtr(ptr: anytype) bool {
         return typeInfo(ptr.ptr()) == makeTypeInfo(std.meta.Child(@TypeOf(ptr.ptr())));
     }
     @compileError(compfmt("{s} is not a class/klass.", .{@typeName(T)}));
+}
+
+pub fn getAllocator(any: anytype) ?std.mem.Allocator {
+    const T = @TypeOf(any);
+    switch (@typeInfo(T)) {
+        else => {},
+        .Struct => {
+            if (isInterfaceType(T)) {
+                return Klass(struct {}).from(@ptrCast(any.ptr)).header.allocator;
+            }
+        },
+        .Pointer => |p| {
+            if (p.size == .One) {
+                if (isKlassType(p.child)) {
+                    return any.header.allocator;
+                } else if (isClassType(p.child)) {
+                    return Klass(p.child).from(any).header.allocator;
+                }
+            }
+        },
+    }
+    return null;
 }
 
 pub fn cast(any: anytype, comptime T: type) t: {
@@ -438,21 +464,21 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
     const ptr: *anyopaque = blk: {
         const T = @TypeOf(any);
         switch (@typeInfo(T)) {
-            else => @compileError("zoop.format(any): any must be interface/*class/*klass."),
+            else => {},
             .Struct => {
                 if (isInterfaceType(T)) {
                     break :blk any.ptr;
-                } else @compileError("zoop.format(any): any must be interface/*class/*klass.");
+                }
             },
             .Pointer => |p| switch (p.size) {
-                else => @compileError("zoop.format(any): any must be interface/*class/*klass."),
+                else => {},
                 .One => {
                     if (isKlassType(p.child)) break :blk @ptrCast(any.ptr());
                     if (isClassType(p.child)) break :blk @ptrCast(any);
-                    @compileError("zoop.format(any): any must be interface/*class/*klass.");
                 },
             },
         }
+        @compileError("zoop.format(any): any must be interface/*class/*klass.");
     };
     try typeinfo.format(ptr, anywriter);
 }

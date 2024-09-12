@@ -91,7 +91,6 @@ test "zoop" {
     // test override and as()
     var custom = zoop.make(Custom, null);
     custom.ptr().init("sub");
-    ihuman = zoop.as(zoop.as(&custom, zoop.IObject).?, IHuman).?;
     try t.expect(zoop.isRootPtr(&custom));
     try t.expect(zoop.isRootPtr(custom.ptr()));
     try t.expect(!zoop.isRootPtr(&custom.ptr().super));
@@ -102,6 +101,7 @@ test "zoop" {
     try t.expectEqualStrings(zoop.as(&custom, Human).?.name, "sub");
     try t.expectEqualStrings(zoop.as(custom.ptr(), Human).?.name, "sub");
     try t.expectEqualStrings(zoop.getField(&custom, "name", []const u8).*, "sub");
+    ihuman = zoop.as(zoop.as(&custom, zoop.IObject).?, IHuman).?;
     try t.expectEqualStrings(ihuman.getName(), "custom");
 
     // test deinit()
@@ -116,9 +116,12 @@ test "zoop" {
     custom = zoop.make(Custom, null);
     try t.expect(custom.ptr().age == 99);
     try t.expectEqualStrings(custom.ptr().super.super.name, "default");
+    try t.expect(zoop.getAllocator(&custom) == null);
 
     // test mem
     var psubsub = try zoop.new(t.allocator, SubSub, null);
+    try t.expect(zoop.getAllocator(psubsub) != null);
+    try t.expect(zoop.getAllocator(zoop.cast(psubsub, zoop.IObject)) != null);
     zoop.destroy(zoop.cast(psubsub, zoop.IObject));
     psubsub = try zoop.new(t.allocator, SubSub, null);
     zoop.destroy(psubsub);
