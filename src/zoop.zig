@@ -122,30 +122,29 @@ pub fn Klass(comptime T: type) type {
         header: Header,
         class: T,
 
-        pub fn new(allocator: std.mem.Allocator) !*@This() {
+        pub fn new(allocator: std.mem.Allocator, init: ?T) !*@This() {
             var self = try allocator.create(@This());
             self.header = .{ .getTypeInfo = typeInfoGetter(T), .deallocator = allocator, .deinit = @ptrCast(&deinit) };
-            initClass(&self.class);
+            if (init) |v| {
+                self.class = v;
+            } else {
+                initClass(&self.class);
+            }
             if (new_hook_func) |func| {
                 func(cast(self.ptr(), IObject));
             }
             return self;
         }
 
-        pub fn make(class: ?T) @This() {
-            if (class) |v| {
-                return .{
-                    .header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) },
-                    .class = v,
-                };
+        pub fn make(init: ?T) @This() {
+            var self: @This() = undefined;
+            self.header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) };
+            if (init) |v| {
+                self.class = v;
             } else {
-                var v: T = undefined;
-                initClass(&v);
-                return .{
-                    .header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) },
-                    .class = v,
-                };
+                initClass(&self.class);
             }
+            return self;
         }
 
         pub fn ptr(self: *@This()) *T {
@@ -291,9 +290,9 @@ pub fn typeId(any: anytype) type_id {
     return typeInfo(any).typeid;
 }
 
-pub fn new(allocator: std.mem.Allocator, comptime T: type) !*T {
+pub fn new(allocator: std.mem.Allocator, comptime T: type, init: ?T) !*T {
     if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.", .{@typeName(T)}));
-    var self = try Klass(T).new(allocator);
+    var self = try Klass(T).new(allocator, init);
     return self.ptr();
 }
 
@@ -322,8 +321,8 @@ pub fn destroy(any: anytype) void {
     }
 }
 
-pub fn make(comptime T: type, val: ?T) Klass(T) {
-    return Klass(T).make(val);
+pub fn make(comptime T: type, init: ?T) Klass(T) {
+    return Klass(T).make(init);
 }
 
 pub fn vptr(iface: anytype) t: {

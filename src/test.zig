@@ -118,10 +118,10 @@ test "zoop" {
     try t.expectEqualStrings(custom.ptr().super.super.name, "default");
 
     // test mem
-    var psubsub = try zoop.new(t.allocator, SubSub);
+    var psubsub = try zoop.new(t.allocator, SubSub, null);
     zoop.destroy(zoop.cast(psubsub, zoop.IObject));
-    psubsub = try zoop.new(t.allocator, SubSub);
+    psubsub = try zoop.new(t.allocator, SubSub, null);
     zoop.destroy(psubsub);
-    psubsub = try zoop.new(t.allocator, SubSub);
+    psubsub = try zoop.new(t.allocator, SubSub, null);
     zoop.destroy(zoop.cast(psubsub, Human));
 }
