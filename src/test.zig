@@ -16,7 +16,7 @@ pub const IHuman = struct {
 };
 
 pub const Human = struct {
-    name: []const u8,
+    name: []const u8 = "default",
 
     pub fn init(self: *Human, name: []const u8) void {
         self.name = name;
@@ -54,6 +54,7 @@ pub const SubSub = struct {
 
 pub const Custom = struct {
     super: Sub,
+    age: u16 = 99,
     pub fn init(self: *Custom, name: []const u8) void {
         self.super.init(name);
     }
@@ -110,6 +111,11 @@ test "zoop" {
     try t.expect(sub.ptr().super.getName().len == 0);
     zoop.destroy(custom.ptr());
     try t.expect(custom.ptr().super.super.name.len == 0);
+
+    // test default field value
+    custom = zoop.make(Custom, null);
+    try t.expect(custom.ptr().age == 99);
+    try t.expectEqualStrings(custom.ptr().super.super.name, "default");
 
     // test mem
     var psubsub = try zoop.new(t.allocator, SubSub);

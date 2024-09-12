@@ -125,6 +125,7 @@ pub fn Klass(comptime T: type) type {
         pub fn new(allocator: std.mem.Allocator) !*@This() {
             var self = try allocator.create(@This());
             self.header = .{ .getTypeInfo = typeInfoGetter(T), .deallocator = allocator, .deinit = @ptrCast(&deinit) };
+            initClass(&self.class);
             if (new_hook_func) |func| {
                 func(cast(self.ptr(), IObject));
             }
@@ -132,10 +133,19 @@ pub fn Klass(comptime T: type) type {
         }
 
         pub fn make(class: ?T) @This() {
-            return .{
-                .header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) },
-                .class = if (class) |v| v else undefined,
-            };
+            if (class) |v| {
+                return .{
+                    .header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) },
+                    .class = v,
+                };
+            } else {
+                var v: T = undefined;
+                initClass(&v);
+                return .{
+                    .header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) },
+                    .class = v,
+                };
+            }
         }
 
         pub fn ptr(self: *@This()) *T {
@@ -478,6 +488,37 @@ fn formatFunc(comptime T: type) *const FormatFunc {
             try writer.print("{any}", .{self});
         }
     }).func;
+}
+
+fn defaultFields(comptime T: type) []StructField {
+    const allfields = std.meta.fields(T);
+    comptime var fields: [allfields.len]StructField = undefined;
+    comptime var idx = 0;
+    inline for (allfields) |field| {
+        if (field.default_value != null) {
+            fields[idx] = field;
+            idx += 1;
+        }
+    }
+    const ret = fields[0..idx];
+    return ret;
+}
+
+fn initDefaultFields(pclass: anytype) void {
+    const T = std.meta.Child(@TypeOf(pclass));
+    inline for (defaultFields(T)) |field| {
+        const ptr: *const field.type = @ptrCast(@alignCast(field.default_value.?));
+        @field(pclass, field.name) = ptr.*;
+    }
+}
+
+fn initClass(pclass: anytype) void {
+    const T = std.meta.Child(@TypeOf(pclass));
+    const supers = classes(T);
+    inline for (supers.items) |V| {
+        const pv: *V = @ptrCast(pclass);
+        initDefaultFields(pv);
+    }
 }
 
 inline fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
