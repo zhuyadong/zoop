@@ -41,10 +41,10 @@ pub const IHuman = struct {
     vptr: *anyopaque,
 
     pub fn getName(self: IHuman) []const u8 {
-        return zoop.vptr(self).getName(self.ptr);
+        return zoop.icall(self, "getName", .{});
     }
     pub fn setName(self: IHuman, name: []const u8) void {
-        zoop.vptr(self).setName(self.ptr, name);
+        zoop.icall(self, "setName", .{name});
     }
 };
 ```
