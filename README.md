@@ -5,7 +5,8 @@
 ## Define Class
 ```zig
 pub const Human = struct {
-    name: []const u8,
+    // zoop class must align == zoop.alignment
+    name: []const u8 align(zoop.alignment),
 
     pub fn init(self: *Human, name: []const u8) void {
         self.name = name;
@@ -26,7 +27,7 @@ pub const Human = struct {
 ## Inherit
 ```zig
 pub const SubHuman = struct {
-    super: Human,
+    super: Human align(zoop.alignment),
 
     pub fn init(self: *SubHuman, name: []const u8) void {
         self.super.init(name);
@@ -51,8 +52,8 @@ pub const IHuman = struct {
 ```zig
 pub const HumanWithIface = struct {
     pub const extends = .{ IHuman };
-    // field name is not important, but must be the first one
-    anyname: SubHuman
+    // field name is not important, but must be the first one and align == zoop.alignment
+    anyname: SubHuman align(zoop.alignment),
 
     pub fn init(self: *HumanWithIface, name: []const u8) void {
         self.anyname.init(name);
@@ -69,7 +70,7 @@ pub const HumanWithIface = struct {
 test  {
     const t = std.testing;
 
-    const Alien = struct {};
+    const Alien = struct {x:u8 align(zoop.alignment)};
 
     var hwi = try zoop.new(t.allocator, HumanWithIface);
     hwi.init("Name");

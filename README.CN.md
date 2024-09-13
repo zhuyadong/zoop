@@ -5,7 +5,8 @@
 ## 定义类
 ```zig
 pub const Human = struct {
-    name: []const u8,
+    // zoop 类必须对齐为 zoop.alignment
+    name: []const u8 align(zoop.alignment),
 
     pub fn init(self: *Human, name: []const u8) void {
         self.name = name;
@@ -26,7 +27,7 @@ pub const Human = struct {
 ## 继承
 ```zig
 pub const SubHuman = struct {
-    super: Human,
+    super: Human align(zoop.alignment),
 
     pub fn init(self: *SubHuman, name: []const u8) void {
         self.super.init(name);
@@ -51,8 +52,8 @@ pub const IHuman = struct {
 ```zig
 pub const HumanWithIface = struct {
     pub const extends = .{ IHuman };
-    // field name is not important, but must be the first one
-    anyname: SubHuman
+    // 父类必须为第一个字段，名字不重要
+    anyname: SubHuman align(zoop.alignment),
 
     pub fn init(self: *HumanWithIface, name: []const u8) void {
         self.anyname.init(name);

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const StructField = std.builtin.Type.StructField;
 const FieldType = std.meta.FieldType;
 const FieldEnum = std.meta.FieldEnum;
@@ -9,21 +10,37 @@ const assert = std.debug.assert;
 const zoop = @This();
 
 //===== public content ======
+pub const alignment = @alignOf(KlassHeader);
 pub const type_id = *const anyopaque;
 pub const VtableGetFunc = fn (iface_id: type_id) ?*anyopaque;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
-pub const TypeInfoGetFunc = fn () *const TypeInfo;
+pub const TypeInfoGetFunc = fn () *const ClassInfo;
 pub const FormatFunc = fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void;
+pub const ClassPtrFunc = fn (*anyopaque) *anyopaque;
 
 pub const HookFunc = *const fn (obj: IObject) void;
 var destroy_hook_func: ?HookFunc = null;
 var new_hook_func: ?HookFunc = null;
 
+pub const ClassInfo = struct {
+    /// class's typeinfo
+    typeinfo: *const TypeInfo,
+    /// offset to class in klass
+    offset: usize,
+    /// get vtable by interface typeid
+    getVtable: *const VtableGetFunc,
+    /// check if can cast to other class
+    isClass: *const ClassCheckFunc,
+    /// call class and all super classes's deinit() and free mem if need
+    deinit: *const fn (pklass: *anyopaque) void,
+};
+
 pub const TypeInfo = struct {
+    /// @typeNmae()
     typename: []const u8,
+    /// typeid of the type
     typeid: type_id,
-    getVtable: ?*const VtableGetFunc,
-    isClass: ?*const ClassCheckFunc,
+    /// type to string
     format: *const FormatFunc,
 };
 
@@ -58,7 +75,7 @@ pub fn getField(any: anytype, comptime name: []const u8, comptime T: type) *T {
     switch (@typeInfo(V)) {
         else => @compileError(compfmt("zoop.getField(any): any must be a pointer to class/klass", .{})),
         .Pointer => |p| {
-            if (isKlassType(p.child)) return getField(any.ptr(), name, T);
+            if (isKlassType(p.child)) return getField(&any.class, name, T);
             if (isClassType(p.child)) {
                 const offset = fieldOffset(p.child, name, T);
                 return @ptrFromInt(@intFromPtr(any) + offset);
@@ -88,6 +105,13 @@ pub fn MethodType(comptime T: type, comptime name: []const u8) type {
     }
 }
 
+fn ReturnType(comptime I: type, comptime method: []const u8) type {
+    comptime {
+        if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
+    }
+    return @typeInfo(@TypeOf(@field(I, method))).Fn.return_type orelse void;
+}
+
 pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
     comptime var Cur = T;
     while (Cur != void) {
@@ -107,72 +131,89 @@ pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name
     return void;
 }
 
-pub fn Klass(comptime T: type) type {
-    if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.", .{@typeName(T)}));
-
+pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
     const kmagic: u32 = 0xaabbccdd;
-    const Header = struct {
-        getTypeInfo: *const TypeInfoGetFunc,
-        deinit: *const fn (*anyopaque) void,
-        allocator: ?std.mem.Allocator = null,
-        magic: u32 = kmagic,
-    };
+    magic: u32 = kmagic,
+    info: *const ClassInfo,
+    allocator: *const fn (*anyopaque) ?std.mem.Allocator,
+} else packed struct {
+    info: *const ClassInfo,
+    allocator: *const fn (*anyopaque) ?std.mem.Allocator,
+};
+
+pub fn Klass(comptime T: type) type {
+    comptime {
+        if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.(check if @alignOf({s}) == zoop.alignment)", .{ @typeName(T), @typeName(T) }));
+    }
+
     return struct {
         pub const @"#klass" = true;
-        header: Header,
+        pub const class_offset: usize = blk: {
+            const pklass: *allowzero @This() = @ptrFromInt(0);
+            break :blk @intFromPtr(&pklass.class);
+        };
+        pub const Class = T;
+        header: KlassHeader,
+        allocator: ?std.mem.Allocator = null,
         class: T,
 
         pub fn new(allocator: std.mem.Allocator, init: ?T) !*@This() {
             var self = try allocator.create(@This());
-            self.header = .{ .getTypeInfo = typeInfoGetter(T), .allocator = allocator, .deinit = @ptrCast(&deinit) };
+            self.header = .{ .info = makeClassInfo(T), .allocator = @ptrCast(&getAlly) };
+            self.allocator = allocator;
             if (init) |v| {
                 self.class = v;
             } else {
                 initClass(&self.class);
             }
             if (new_hook_func) |func| {
-                func(cast(self.ptr(), IObject));
+                func(cast(&self.class, IObject));
             }
             return self;
         }
 
         pub fn make(init: ?T) @This() {
             var self: @This() = undefined;
-            self.header = .{ .getTypeInfo = typeInfoGetter(T), .deinit = @ptrCast(&deinit) };
+            self.header = .{ .info = makeClassInfo(T), .allocator = @ptrCast(&getAlly) };
+            self.allocator = null;
             if (init) |v| {
                 self.class = v;
             } else {
                 initClass(&self.class);
             }
             if (new_hook_func) |func| {
-                func(cast(self.ptr(), IObject));
+                func(cast(&self.class, IObject));
             }
             return self;
-        }
-
-        pub fn ptr(self: *@This()) *T {
-            return &self.class;
         }
 
         pub fn from(pclass: *const T) *@This() {
-            const self: *@This() = @constCast(@alignCast(@fieldParentPtr("class", pclass)));
-            assert(self.header.magic == kmagic);
+            const self: *@This() = @alignCast(@constCast(@fieldParentPtr("class", pclass)));
+            if (comptime builtin.mode == .Debug) {
+                assert(self.header.magic == KlassHeader.kmagic);
+            }
             return self;
         }
 
+        fn getAlly(self: *@This()) ?std.mem.Allocator {
+            return self.allocator;
+        }
+
         fn deinit(self: *@This()) void {
-            assert(self.header.magic == kmagic);
-            assert(self.header.getTypeInfo == typeInfoGetter(T));
+            if (comptime builtin.mode == .Debug) {
+                assert(self.header.magic == KlassHeader.kmagic);
+                assert(self.header.info == makeClassInfo(T));
+            }
             if (destroy_hook_func) |func| {
-                func(cast(self.ptr(), IObject));
+                func(cast(&self.class, IObject));
             }
             inline for (classes(T).items) |V| {
                 if (@hasDecl(V, "deinit")) {
-                    var p: *V = @ptrCast(self.ptr());
+                    var p: *V = @ptrCast(&self.class);
                     p.deinit();
                 }
             }
-            if (self.header.allocator) |dtor| {
+            if (self.allocator) |dtor| {
                 dtor.destroy(self);
             }
         }
@@ -189,18 +230,8 @@ pub fn Vtable(comptime I: type) type {
         nfield += @typeInfo(vtables[i]).Struct.fields.len;
     }
 
-    comptime var allfields: [nfield + 1]StructField = undefined;
-    // 0 for VtableHeader
-    allfields[0] = StructField{
-        .alignment = @alignOf(VtableHeader),
-        .default_value = null,
-        .is_comptime = false,
-        .name = "#header",
-        .type = VtableHeader,
-    };
-
-    // 1.. for vtables
-    comptime var idx: comptime_int = 1;
+    comptime var allfields: [nfield]StructField = undefined;
+    comptime var idx: comptime_int = 0;
     for (vtables) |vt| {
         const fields = @typeInfo(vt).Struct.fields;
         for (fields) |field| {
@@ -218,7 +249,7 @@ pub fn Vtable(comptime I: type) type {
     });
 }
 
-pub fn tupleInit(any: anytype) Tuple {
+pub fn tupleInit(comptime any: anytype) Tuple {
     if (isTuple(any)) return any;
 
     if (@TypeOf(any) == @TypeOf(.{})) {
@@ -232,7 +263,7 @@ pub fn tupleInit(any: anytype) Tuple {
     };
 }
 
-pub fn tupleAppend(tuple: Tuple, any: anytype) Tuple {
+pub fn tupleAppend(comptime tuple: Tuple, comptime any: anytype) Tuple {
     if (isTuple(any)) {
         return struct {
             pub const items = tuple.items ++ any.items;
@@ -244,7 +275,7 @@ pub fn tupleAppend(tuple: Tuple, any: anytype) Tuple {
     }
 }
 
-pub fn tupleAppendUnique(tuple: Tuple, any: anytype) Tuple {
+pub fn tupleAppendUnique(comptime tuple: Tuple, comptime any: anytype) Tuple {
     comptime {
         var ret = tuple;
         for (tupleInit(any).items) |item| {
@@ -256,7 +287,7 @@ pub fn tupleAppendUnique(tuple: Tuple, any: anytype) Tuple {
     }
 }
 
-pub inline fn tupleHas(tuple: Tuple, any: anytype) bool {
+pub inline fn tupleHas(comptime tuple: Tuple, comptime any: type) bool {
     comptime {
         for (tuple.items) |item| {
             if (item == any) return true;
@@ -266,44 +297,38 @@ pub inline fn tupleHas(tuple: Tuple, any: anytype) bool {
 }
 
 pub fn typeInfo(any: anytype) *const TypeInfo {
-    const T = @TypeOf(any);
-    if (T == type) {
+    if (@TypeOf(any) == type) {
         return makeTypeInfo(any);
-    } else if (isInterfaceType(T)) {
-        const head: *VtableHeader = @ptrCast(@alignCast(any.vptr));
-        return head.getTypeInfo();
     } else {
-        switch (@typeInfo(T)) {
-            else => {},
-            .Pointer => |p| {
-                if (p.size == .One) {
-                    if (isKlassType(p.child)) {
-                        return any.header.getTypeInfo();
-                    } else if (isClassType(p.child)) {
-                        return Klass(p.child).from(any).header.getTypeInfo();
-                    }
-                }
-            },
-        }
         return makeTypeInfo(@TypeOf(any));
     }
 }
 
+pub fn classInfo(any: anytype) *const ClassInfo {
+    return ClassInfoGetter(@TypeOf(any)).get(any);
+}
+
 pub fn typeId(any: anytype) type_id {
-    return typeInfo(any).typeid;
+    if (@TypeOf(any) == type) {
+        return makeTypeId(any);
+    } else {
+        return makeTypeId(@TypeOf(any));
+    }
 }
 
 pub fn new(allocator: std.mem.Allocator, comptime T: type, init: ?T) !*T {
-    if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.", .{@typeName(T)}));
+    comptime {
+        if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.", .{@typeName(T)}));
+    }
     var self = try Klass(T).new(allocator, init);
-    return self.ptr();
+    return &self.class;
 }
 
 pub fn destroy(any: anytype) void {
     const T = @TypeOf(any);
     if (isInterfaceType(T)) {
-        var klass = Klass(struct {}).from(@ptrCast(@alignCast(any.ptr)));
-        return klass.header.deinit(@ptrCast(klass));
+        var header: *KlassHeader = @ptrCast(@alignCast(any.ptr));
+        return header.info.deinit(@ptrCast(header));
     } else {
         switch (@typeInfo(T)) {
             else => {},
@@ -312,10 +337,10 @@ pub fn destroy(any: anytype) void {
                     else => {},
                     .One => {
                         if (isKlassType(p.child)) {
-                            return any.header.deinit(@ptrCast(any));
+                            return any.header.info.deinit(@ptrCast(any));
                         } else if (isClassType(p.child)) {
                             var klass = Klass(p.child).from(any);
-                            return klass.header.deinit(@ptrCast(klass));
+                            return klass.header.info.deinit(@ptrCast(klass));
                         }
                     },
                 }
@@ -329,19 +354,22 @@ pub fn make(comptime T: type, init: ?T) Klass(T) {
     return Klass(T).make(init);
 }
 
-pub fn vptr(iface: anytype) t: {
-    if (!isInterfaceType(@TypeOf(iface))) @compileError(compfmt("'{s}' is not an interface type.", .{@typeName(@TypeOf(iface))}));
-    break :t *const Vtable(@TypeOf(iface));
-} {
-    return @ptrCast(@alignCast(iface.vptr));
+pub fn icall(iface: anytype, comptime method: []const u8, args: anytype) ReturnType(@TypeOf(iface), method) {
+    comptime {
+        if (!isInterfaceType(@TypeOf(iface))) @compileError(compfmt("'{s}' is not an interface type.", .{@typeName(@TypeOf(iface))}));
+    }
+    const vptr: *const Vtable(@TypeOf(iface)) = @ptrCast(@alignCast(iface.vptr));
+    const pheader: *KlassHeader = @ptrCast(@alignCast(iface.ptr));
+    const ptr: *anyopaque = @ptrFromInt(@intFromPtr(pheader) + pheader.info.offset);
+    return @call(.auto, @field(vptr, method), .{ptr} ++ args);
 }
 
 pub fn isRootPtr(ptr: anytype) bool {
     const T = std.meta.Child(@TypeOf(ptr));
     if (isClassType(T)) {
-        return typeInfo(ptr) == makeTypeInfo(T);
+        return classInfo(ptr) == makeClassInfo(T);
     } else if (isKlassType(T)) {
-        return typeInfo(ptr.ptr()) == makeTypeInfo(std.meta.Child(@TypeOf(ptr.ptr())));
+        return classInfo(ptr) == makeClassInfo(T.Class);
     }
     @compileError(compfmt("{s} is not a class/klass.", .{@typeName(T)}));
 }
@@ -352,15 +380,16 @@ pub fn getAllocator(any: anytype) ?std.mem.Allocator {
         else => {},
         .Struct => {
             if (isInterfaceType(T)) {
-                return Klass(struct {}).from(@ptrCast(any.ptr)).header.allocator;
+                const header: *KlassHeader = @ptrCast(@alignCast(any.ptr));
+                return header.allocator(any.ptr);
             }
         },
         .Pointer => |p| {
             if (p.size == .One) {
                 if (isKlassType(p.child)) {
-                    return any.header.allocator;
+                    return any.allocator;
                 } else if (isClassType(p.child)) {
-                    return Klass(p.child).from(any).header.allocator;
+                    return Klass(p.child).from(any).allocator;
                 }
             }
         },
@@ -382,7 +411,7 @@ pub fn cast(any: anytype, comptime T: type) t: {
         if (isInterfaceType(T)) {
             // interface -> interface
             if (tupleHas(interfaces(V), T)) {
-                return T{ .ptr = any.ptr, .vptr = typeInfo(any).getVtable.?(makeTypeId(T)).? };
+                return T{ .ptr = any.ptr, .vptr = classInfo(any).getVtable(makeTypeId(T)).? };
             }
         }
     } else switch (@typeInfo(V)) {
@@ -392,7 +421,7 @@ pub fn cast(any: anytype, comptime T: type) t: {
                 if (isInterfaceType(T)) {
                     // class -> interface
                     if (tupleHas(interfaces(p.child), T)) {
-                        return T{ .ptr = @ptrCast(@constCast(any)), .vptr = makeVtable(p.child, T) };
+                        return T{ .ptr = @ptrCast(Klass(p.child).from(any)), .vptr = makeVtable(p.child, T) };
                     }
                 } else if (isClassType(T)) {
                     // class -> class
@@ -403,7 +432,7 @@ pub fn cast(any: anytype, comptime T: type) t: {
                     }
                 }
             } else if (isKlassType(p.child)) {
-                return cast(any.ptr(), T);
+                return cast(&any.class, T);
             }
         },
     }
@@ -419,25 +448,22 @@ pub fn as(any: anytype, comptime T: type) t: {
 } {
     const V = @TypeOf(any);
     const ptr: *anyopaque = blk: {
-        if (isInterfaceType(V)) break :blk any.ptr;
-        if (isKlassType(std.meta.Child(V))) break :blk @ptrCast(any.ptr());
-        if (isClassType(std.meta.Child(V))) break :blk @ptrCast(any);
+        if (isInterfaceType(V)) break :blk @alignCast(any.ptr);
+        if (isKlassType(std.meta.Child(V))) break :blk @ptrCast(@alignCast(any));
+        if (isClassType(std.meta.Child(V))) break :blk @ptrCast(@alignCast(Klass(std.meta.Child(V)).from(any)));
         unreachable;
     };
-    const typeinfo = Klass(struct {}).from(@ptrCast(ptr)).header.getTypeInfo();
+    const info = classInfo(any);
 
     if (isInterfaceType(T)) {
-        if (typeinfo.getVtable) |get| {
-            if (get(makeTypeId(T))) |pvtable| {
-                return T{ .ptr = ptr, .vptr = pvtable };
-            }
+        if (info.getVtable(makeTypeId(T))) |pvtable| {
+            return T{ .ptr = ptr, .vptr = pvtable };
         }
     }
     if (isClassType(T)) {
-        if (typeinfo.isClass) |is| {
-            if (is(makeTypeId(T))) {
-                return @ptrCast(@alignCast(ptr));
-            }
+        if (info.isClass(makeTypeId(T))) {
+            const klass: *Klass(T) = @ptrCast(@alignCast(ptr));
+            return &klass.class;
         }
     }
 
@@ -459,7 +485,7 @@ pub fn isNil(any: anytype) bool {
 }
 
 pub fn format(any: anytype, writer: anytype) anyerror!void {
-    const typeinfo = typeInfo(any);
+    const typeinfo = classInfo(any);
     const anywriter = if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any();
     const ptr: *anyopaque = blk: {
         const T = @TypeOf(any);
@@ -467,13 +493,14 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
             else => {},
             .Struct => {
                 if (isInterfaceType(T)) {
-                    break :blk any.ptr;
+                    const pheader: *KlassHeader = @ptrCast(@alignCast(any.ptr));
+                    break :blk @ptrFromInt(@intFromPtr(pheader) + pheader.info.offset);
                 }
             },
             .Pointer => |p| switch (p.size) {
                 else => {},
                 .One => {
-                    if (isKlassType(p.child)) break :blk @ptrCast(any.ptr());
+                    if (isKlassType(p.child)) break :blk @ptrCast(&any.class);
                     if (isClassType(p.child)) break :blk @ptrCast(any);
                 },
             },
@@ -488,8 +515,10 @@ const VtableHeader = struct {
     getTypeInfo: *const TypeInfoGetFunc,
 };
 
-fn vtableGetter(comptime T: type) ?*const VtableGetFunc {
-    if (!isClassType(T)) return null;
+fn vtableGetter(comptime T: type) *const VtableGetFunc {
+    comptime {
+        if (!isClassType(T)) @compileError("unsupport type: " ++ @typeName(T));
+    }
     const ifaces = interfaces(T);
     const KV = struct { typeid: type_id, vtable: *anyopaque };
     comptime var kvs: [ifaces.items.len]KV = undefined;
@@ -504,6 +533,55 @@ fn vtableGetter(comptime T: type) ?*const VtableGetFunc {
             return null;
         }
     }).func;
+}
+
+fn ClassInfoGetter(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        else => {},
+        .Type => {
+            if (isKlassType(T)) {
+                return struct {
+                    pub fn get(_: anytype) *const ClassInfo {
+                        return makeClassInfo(T.Class);
+                    }
+                };
+            }
+            if (isClassType(T)) {
+                return struct {
+                    pub fn get(_: anytype) *const ClassInfo {
+                        return makeClassInfo(T);
+                    }
+                };
+            }
+        },
+        .Pointer => |p| {
+            if (isKlassType(p.child)) {
+                return struct {
+                    pub fn get(klass: anytype) *const ClassInfo {
+                        return klass.header.info;
+                    }
+                };
+            }
+            if (isClassType(p.child)) {
+                return struct {
+                    pub fn get(class: anytype) *const ClassInfo {
+                        return Klass(p.child).from(@ptrCast(class)).header.info;
+                    }
+                };
+            }
+        },
+        .Struct => {
+            if (isInterfaceType(T)) {
+                return struct {
+                    pub fn get(iface: anytype) *const ClassInfo {
+                        const pheader: *KlassHeader = @ptrCast(@alignCast(iface.ptr));
+                        return pheader.info;
+                    }
+                };
+            }
+        },
+    }
+    @compileError("zoop.classInfo(any) where any must be Class/*class/Klass/*klass/interface");
 }
 
 fn formatFunc(comptime T: type) *const FormatFunc {
@@ -546,25 +624,28 @@ fn initClass(pclass: anytype) void {
     }
 }
 
-inline fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
-    const offset: usize = comptime blk: {
-        const supers = classes(T);
-        for (supers.items) |V| {
-            if (@hasField(V, name)) {
-                if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
-                    const pv: *allowzero V = @ptrFromInt(0);
-                    const pf = &@field(pv, name);
-                    break :blk @intFromPtr(pf);
+fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
+    return (struct {
+        pub const val: usize = blk: {
+            const supers = classes(T);
+            for (supers.items) |V| {
+                if (@hasField(V, name)) {
+                    if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
+                        const pv: *allowzero V = @ptrFromInt(0);
+                        const pf = &@field(pv, name);
+                        break :blk @intFromPtr(pf);
+                    }
                 }
             }
-        }
-        @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
-    };
-    return offset;
+            @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
+        };
+    }).val;
 }
 
-fn classChecker(comptime T: type) ?*const ClassCheckFunc {
-    if (!isClassType(T)) return null;
+fn classChecker(comptime T: type) *const ClassCheckFunc {
+    comptime {
+        if (!isClassType(T)) @compileError("unsupport type: " ++ @typeName(T));
+    }
     return (struct {
         pub fn func(class_id: type_id) bool {
             inline for (classes(T).items) |class| {
@@ -575,29 +656,31 @@ fn classChecker(comptime T: type) ?*const ClassCheckFunc {
     }).func;
 }
 
-inline fn makeTypeInfo(comptime T: type) *const TypeInfo {
+fn makeClassInfo(comptime T: type) *const ClassInfo {
+    return &(struct {
+        pub const info: ClassInfo = .{
+            .offset = Klass(T).class_offset,
+            .typeinfo = makeTypeInfo(T),
+            .getVtable = vtableGetter(T),
+            .isClass = classChecker(T),
+            .deinit = @ptrCast(&Klass(T).deinit),
+        };
+    }).info;
+}
+
+fn makeTypeInfo(comptime T: type) *const TypeInfo {
     return &(struct {
         pub const info: TypeInfo = .{
             .typename = @typeName(T),
             .typeid = makeTypeId(T),
-            .getVtable = vtableGetter(T),
-            .isClass = classChecker(T),
             .format = formatFunc(T),
         };
     }).info;
 }
 
-fn typeInfoGetter(comptime T: type) *const TypeInfoGetFunc {
-    return &(struct {
-        pub fn func() *const TypeInfo {
-            return makeTypeInfo(T);
-        }
-    }).func;
-}
-
 fn makeTypeId(comptime T: type) type_id {
     return @ptrCast(&(struct {
-        pub const val: ?*T = null;
+        pub const val: *T = undefined;
     }).val);
 }
 
@@ -606,8 +689,7 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
     return @constCast(&(struct {
         pub const vt: VT = blk: {
             var val: VT = undefined;
-            @field(val, "#header") = VtableHeader{ .getTypeInfo = typeInfoGetter(T) };
-            for (std.meta.fields(VT)[1..]) |field| {
+            for (std.meta.fields(VT)[0..]) |field| {
                 const MT = MethodType(T, field.name);
                 if (MT != void) {
                     checkApi(T, I, field.name);
@@ -640,34 +722,44 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
     }
 }
 
-inline fn isInterfaceType(comptime T: type) bool {
-    comptime {
-        const fields = @typeInfo(IObject).Struct.fields;
-        return switch (@typeInfo(T)) {
-            else => false,
-            .Struct => |s| s.fields.len == fields.len and
-                s.fields[0].type == fields[0].type and
-                s.fields[1].type == fields[1].type and
-                std.mem.eql(u8, s.fields[0].name, fields[0].name) and
-                std.mem.eql(u8, s.fields[1].name, fields[1].name),
+pub inline fn isInterfaceType(comptime T: type) bool {
+    return (struct {
+        pub const val = blk: {
+            const fields = @typeInfo(IObject).Struct.fields;
+            break :blk switch (@typeInfo(T)) {
+                else => false,
+                .Struct => |s| s.fields.len == fields.len and
+                    s.fields[0].type == fields[0].type and
+                    s.fields[1].type == fields[1].type and
+                    std.mem.eql(u8, s.fields[0].name, fields[0].name) and
+                    std.mem.eql(u8, s.fields[1].name, fields[1].name),
+            };
         };
-    }
+    }).val;
 }
 
 inline fn isClassType(comptime T: type) bool {
-    if (isKlassType(T)) return false;
-    if (isInterfaceType(T)) return false;
-    return switch (@typeInfo(T)) {
-        else => false,
-        .Struct => |s| !s.is_tuple,
-    };
+    return (struct {
+        pub const val = blk: {
+            if (isKlassType(T)) break :blk false;
+            if (isInterfaceType(T)) break :blk false;
+            break :blk switch (@typeInfo(T)) {
+                else => false,
+                .Struct => |s| !s.is_tuple and s.fields.len > 0 and s.fields[0].alignment == alignment,
+            };
+        };
+    }).val;
 }
 
 inline fn isKlassType(comptime T: type) bool {
-    if (@typeInfo(T) == .Struct) {
-        return @hasDecl(T, "#klass");
-    }
-    return false;
+    return (struct {
+        pub const val = blk: {
+            if (@typeInfo(T) == .Struct) {
+                break :blk @hasDecl(T, "#klass");
+            }
+            break :blk false;
+        };
+    }).val;
 }
 
 inline fn isTuple(any: anytype) bool {
@@ -683,67 +775,75 @@ inline fn isTuple(any: anytype) bool {
     }
 }
 
-fn interfaces(comptime T: type) Tuple {
-    comptime var ret = tupleInit(IObject);
+pub fn interfaces(comptime T: type) Tuple {
+    return (struct {
+        pub const val = blk: {
+            var ret = tupleInit(IObject);
 
-    if (isInterfaceType(T)) {
-        ret = tupleAppendUnique(ret, T);
-        if (@hasDecl(T, "extends")) {
-            const extends = @field(T, "extends");
-            switch (@typeInfo(@TypeOf(extends))) {
-                else => {},
-                .Struct => |s| {
-                    if (s.is_tuple) {
-                        inline for (extends) |iface| {
-                            if (isInterfaceType(iface)) {
-                                ret = tupleAppendUnique(ret, interfaces(iface));
-                            } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
-                        }
+            if (isInterfaceType(T)) {
+                ret = tupleAppendUnique(ret, T);
+                if (@hasDecl(T, "extends")) {
+                    const extends = @field(T, "extends");
+                    switch (@typeInfo(@TypeOf(extends))) {
+                        else => {},
+                        .Struct => |s| {
+                            if (s.is_tuple) {
+                                for (extends) |iface| {
+                                    if (isInterfaceType(iface)) {
+                                        ret = tupleAppendUnique(ret, interfaces(iface));
+                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                                }
+                            }
+                        },
                     }
-                },
-            }
-        }
-    } else if (isClassType(T)) {
-        if (@hasDecl(T, "extends")) {
-            const extends = @field(T, "extends");
-            switch (@typeInfo(@TypeOf(extends))) {
-                else => {},
-                .Struct => |s| {
-                    if (s.is_tuple) {
-                        inline for (extends) |iface| {
-                            if (isInterfaceType(iface)) {
-                                ret = tupleAppendUnique(ret, interfaces(iface));
-                            } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
-                        }
+                }
+            } else if (isClassType(T)) {
+                if (@hasDecl(T, "extends")) {
+                    const extends = @field(T, "extends");
+                    switch (@typeInfo(@TypeOf(extends))) {
+                        else => {},
+                        .Struct => |s| {
+                            if (s.is_tuple) {
+                                for (extends) |iface| {
+                                    if (isInterfaceType(iface)) {
+                                        ret = tupleAppendUnique(ret, interfaces(iface));
+                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                                }
+                            }
+                        },
                     }
-                },
+                }
+                const fields = std.meta.fields(T);
+                if (fields.len > 0 and isClassType(fields[0].type)) {
+                    ret = tupleAppendUnique(ret, interfaces(fields[0].type));
+                }
             }
-        }
-        const fields = std.meta.fields(T);
-        if (fields.len > 0 and isClassType(fields[0].type)) {
-            ret = tupleAppendUnique(ret, interfaces(fields[0].type));
-        }
-    }
 
-    return ret;
+            break :blk ret;
+        };
+    }).val;
 }
 
 fn classes(comptime T: type) Tuple {
-    comptime var ret = tupleInit(.{});
-    if (!isClassType(T)) return ret;
+    return (struct {
+        pub const val = blk: {
+            var ret = tupleInit(.{});
+            if (!isClassType(T)) break :blk ret;
 
-    comptime var Cur = T;
-    while (Cur != void) {
-        ret = tupleAppend(ret, Cur);
-        const fields = std.meta.fields(Cur);
-        if (fields.len > 0 and isClassType(fields[0].type)) {
-            Cur = fields[0].type;
-        } else {
-            Cur = void;
-        }
-    }
+            var Cur = T;
+            while (Cur != void) {
+                ret = tupleAppend(ret, Cur);
+                const fields = std.meta.fields(Cur);
+                if (fields.len > 0 and isClassType(fields[0].type)) {
+                    Cur = fields[0].type;
+                } else {
+                    Cur = void;
+                }
+            }
 
-    return ret;
+            break :blk ret;
+        };
+    }).val;
 }
 
 fn VtableDirect(comptime I: type) type {
@@ -798,17 +898,20 @@ fn VtableFieldType(comptime F: std.builtin.Type.Fn) type {
         .calling_convention = F.calling_convention,
     } });
 }
+
 inline fn pointerType(any: anytype) enum {
     no,
     read,
     write,
 } {
-    comptime {
-        const T = @TypeOf(any);
-        const info = if (T == type) @typeInfo(any) else @typeInfo(T);
-        return switch (info) {
-            else => .no,
-            .Pointer => |p| if (p.is_const) .read else .write,
+    return (struct {
+        pub const val = blk: {
+            const T = @TypeOf(any);
+            const info = if (T == type) @typeInfo(any) else @typeInfo(T);
+            break :blk switch (info) {
+                else => .no,
+                .Pointer => |p| if (p.is_const) .read else .write,
+            };
         };
-    }
+    }).val;
 }
