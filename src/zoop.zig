@@ -345,8 +345,8 @@ pub fn icall(iface: anytype, comptime method: []const u8, args: anytype) ReturnT
         if (!isInterfaceType(@TypeOf(iface))) @compileError(compfmt("'{s}' is not an interface type.", .{@typeName(@TypeOf(iface))}));
     }
     const vptr: *const Vtable(@TypeOf(iface)) = @ptrCast(@alignCast(iface.vptr));
-    const pheader: *KlassHeader = @ptrCast(@alignCast(iface.ptr));
-    const ptr: *anyopaque = @ptrFromInt(@intFromPtr(pheader) + pheader.info.offset);
+    const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(iface.ptr));
+    const ptr: *anyopaque = @ptrFromInt(@intFromPtr(pklass) + pklass.header.info.offset);
     return @call(.auto, @field(vptr, method), .{ptr} ++ args);
 }
 
@@ -440,7 +440,7 @@ pub fn isNil(any: anytype) bool {
 }
 
 pub fn format(any: anytype, writer: anytype) anyerror!void {
-    const typeinfo = classInfo(any);
+    const classinfo = classInfo(any);
     const anywriter = if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any();
     const ptr: *anyopaque = blk: {
         const T = @TypeOf(any);
@@ -448,8 +448,8 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
             else => {},
             .Struct => {
                 if (isInterfaceType(T)) {
-                    const pheader: *KlassHeader = @ptrCast(@alignCast(any.ptr));
-                    break :blk @ptrFromInt(@intFromPtr(pheader) + pheader.info.offset);
+                    const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(any.ptr));
+                    break :blk @ptrFromInt(@intFromPtr(pklass) + pklass.header.info.offset);
                 }
             },
             .Pointer => |p| switch (p.size) {
@@ -462,7 +462,7 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
         }
         @compileError("zoop.format(any): any must be interface/*class/*klass.");
     };
-    try typeinfo.format(ptr, anywriter);
+    try classinfo.format(ptr, anywriter);
 }
 
 //===== private content ======
@@ -616,8 +616,8 @@ fn ClassInfoGetter(comptime T: type) type {
             if (isInterfaceType(T)) {
                 return struct {
                     pub fn get(iface: anytype) *const ClassInfo {
-                        const pheader: *KlassHeader = @ptrFromInt(@intFromPtr(iface.ptr));
-                        return pheader.info;
+                        const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(iface.ptr));
+                        return pklass.header.info;
                     }
                 };
             }
