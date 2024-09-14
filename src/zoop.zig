@@ -466,10 +466,6 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
 }
 
 //===== private content ======
-const VtableHeader = struct {
-    getTypeInfo: *const TypeInfoGetFunc,
-};
-
 fn vtableGetter(comptime T: type) *const VtableGetFunc {
     comptime {
         if (!isClassType(T)) @compileError("unsupport type: " ++ @typeName(T));
