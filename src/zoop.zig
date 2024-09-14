@@ -561,7 +561,11 @@ fn Caster(comptime V: type, comptime T: type) type {
                 }
             } else if (isKlassType(p.child)) {
                 // klass -> T
-                const caster = Caster(*p.child.Class, T);
+                const caster = switch (pointerType(V)) {
+                    else => unreachable,
+                    .read => Caster(*const p.child.Class, T),
+                    .write => Caster(*p.child.Class, T),
+                };
                 return struct {
                     pub fn cast(any: anytype, comptime ANY: type) @TypeOf(caster.cast(&any.class, ANY)) {
                         return caster.cast(&any.class, ANY);

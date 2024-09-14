@@ -265,6 +265,9 @@ test "zoop" {
         // test heap address
         var psubsub = try zoop.new(t.allocator, SubSub, null);
         ihuman = zoop.cast(psubsub, IHuman);
+        const cpsubsub: *const SubSub = psubsub;
+        const cpsub = zoop.cast(cpsubsub, Sub);
+        try t.expect(@typeInfo(@TypeOf(cpsub)).Pointer.is_const);
         const ksubsub = zoop.Klass(SubSub).from(psubsub);
         try t.expect(@intFromPtr(ihuman.ptr) == @intFromPtr(ksubsub));
         try t.expectEqualStrings(ihuman.getName(), "default");
