@@ -84,51 +84,30 @@ pub fn getField(any: anytype, comptime name: []const u8, comptime T: type) *T {
     }
 }
 
-pub fn MethodType(comptime T: type, comptime name: []const u8) type {
+pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
     comptime {
-        var Cur = T;
-        while (Cur != void) {
-            if (@hasDecl(Cur, name)) {
-                const FT = @TypeOf(@field(Cur, name));
-                if (@typeInfo(FT) == .Fn) {
-                    return FT;
+        if (!isClassType(T)) @compileError(compfmt("{s} is not an class type.", .{@typeName(T)}));
+    }
+    return (struct {
+        pub const method = blk: {
+            var Cur = T;
+            while (Cur != void) {
+                if (@hasDecl(Cur, name)) {
+                    const FT = @TypeOf(@field(Cur, name));
+                    if (@typeInfo(FT) == .Fn) {
+                        break :blk @field(Cur, name);
+                    }
+                }
+                const fields = @typeInfo(Cur).Struct.fields;
+                if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+                    Cur = fields[0].type;
+                } else {
+                    Cur = void;
                 }
             }
-            const fields = @typeInfo(Cur).Struct.fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
-                Cur = fields[0].type;
-            } else {
-                Cur = void;
-            }
-        }
-        return void;
-    }
-}
-
-fn ReturnType(comptime I: type, comptime method: []const u8) type {
-    comptime {
-        if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
-    }
-    return @typeInfo(@TypeOf(@field(I, method))).Fn.return_type orelse void;
-}
-
-pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
-    comptime var Cur = T;
-    while (Cur != void) {
-        if (@hasDecl(Cur, name)) {
-            const FT = @TypeOf(@field(Cur, name));
-            if (@typeInfo(FT) == .Fn) {
-                return @field(Cur, name);
-            }
-        }
-        const fields = @typeInfo(Cur).Struct.fields;
-        if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
-            Cur = fields[0].type;
-        } else {
-            Cur = void;
-        }
-    }
-    return void;
+            break :blk void;
+        };
+    }).method;
 }
 
 pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
@@ -223,6 +202,9 @@ pub fn Klass(comptime T: type) type {
 }
 
 pub fn Vtable(comptime I: type) type {
+    comptime {
+        if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
+    }
     const ifaces = interfaces(I);
     comptime var vtables: [ifaces.items.len]type = undefined;
     comptime var nfield: comptime_int = 0;
@@ -504,6 +486,34 @@ fn vtableGetter(comptime T: type) *const VtableGetFunc {
             return null;
         }
     }).func;
+}
+
+fn MethodType(comptime T: type, comptime name: []const u8) type {
+    comptime {
+        var Cur = T;
+        while (Cur != void) {
+            if (@hasDecl(Cur, name)) {
+                const FT = @TypeOf(@field(Cur, name));
+                if (@typeInfo(FT) == .Fn) {
+                    return FT;
+                }
+            }
+            const fields = @typeInfo(Cur).Struct.fields;
+            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+                Cur = fields[0].type;
+            } else {
+                Cur = void;
+            }
+        }
+        return void;
+    }
+}
+
+fn ReturnType(comptime I: type, comptime method: []const u8) type {
+    comptime {
+        if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
+    }
+    return @typeInfo(@TypeOf(@field(I, method))).Fn.return_type orelse void;
 }
 
 fn Caster(comptime V: type, comptime T: type) type {
