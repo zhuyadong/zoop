@@ -99,6 +99,10 @@ pub const Human = struct {
     pub fn setName(self: HumanPtr, name: []const u8) void {
         self.name = name;
     }
+
+    pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("Human{{.age = {}, .name='{s}'}}", .{ self.age, self.name });
+    }
 };
 
 pub const Sub = struct {
@@ -291,6 +295,7 @@ test "zoop" {
         try t.expect(zoop.getAllocator(&psubsub.super.super).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(zoop.cast(psubsub, zoop.IObject)).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super.super).?.ptr);
+        std.debug.print("ihuman: {}\n", .{zoop.cast(ihuman, zoop.IObject)});
         zoop.destroy(ihuman);
 
         // test destroy

@@ -59,7 +59,7 @@ pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
     pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        zoop.format(self.*, writer);
+        try zoop.format(self.*, writer);
     }
 };
 
@@ -462,7 +462,7 @@ pub fn format(any: anytype, writer: anytype) anyerror!void {
         }
         @compileError("zoop.format(any): any must be interface/*class/*klass.");
     };
-    try classinfo.format(ptr, anywriter);
+    try classinfo.typeinfo.format(ptr, anywriter);
 }
 
 //===== private content ======
