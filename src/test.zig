@@ -125,10 +125,30 @@ test "zoop" {
     const t = std.testing;
 
     if (true) {
+        // test interface excludes
+        const Itest = struct {
+            pub const excludes = .{"exfunc"};
+
+            ptr: *anyopaque,
+            vptr: *anyopaque,
+
+            pub fn exfunc(self: @This()) void {
+                zoop.icall(self, "exfunc", .{});
+            }
+
+            pub fn func(self: @This()) void {
+                zoop.icall(self, "func", .{});
+            }
+        };
+
+        const VTest = zoop.Vtable(Itest);
+        try t.expect(@hasField(VTest, "func"));
+        try t.expect(!@hasField(VTest, "exfunc"));
+
+        // test inherit
         var human = zoop.make(Human, null);
         try t.expect(zoop.as(&human.class, IHuman) == null);
 
-        // test inherit
         var sub = zoop.make(Sub, .{ .super = .{ .name = "sub" } });
         const psub = &sub.class;
         const phuman: *Human = &sub.class.super;

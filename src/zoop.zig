@@ -876,6 +876,15 @@ fn classes(comptime T: type) Tuple {
     }).val;
 }
 
+inline fn isExclude(comptime I: type, comptime method: []const u8) bool {
+    if (@hasDecl(I, "excludes")) {
+        inline for (@field(I, "excludes")) |name| {
+            if (std.mem.eql(u8, method, name)) return true;
+        }
+    }
+    return false;
+}
+
 fn VtableDirect(comptime I: type) type {
     if (I == IObject) return struct {};
 
@@ -883,21 +892,23 @@ fn VtableDirect(comptime I: type) type {
     comptime var fields: [decls.len]StructField = undefined;
     comptime var idx = 0;
     for (decls) |decl| {
-        const info = @typeInfo(@TypeOf(@field(I, decl.name)));
-        switch (info) {
-            .Fn => |f| {
-                if (f.params.len > 0 and f.params[0].type == I) {
-                    fields[idx] = StructField{
-                        .alignment = @alignOf(VtableFieldType(f)),
-                        .default_value = null,
-                        .is_comptime = false,
-                        .name = decl.name,
-                        .type = VtableFieldType(f),
-                    };
-                    idx += 1;
-                }
-            },
-            else => {},
+        if (!isExclude(I, decl.name)) {
+            const info = @typeInfo(@TypeOf(@field(I, decl.name)));
+            switch (info) {
+                .Fn => |f| {
+                    if (f.params.len > 0 and f.params[0].type == I) {
+                        fields[idx] = StructField{
+                            .alignment = @alignOf(VtableFieldType(f)),
+                            .default_value = null,
+                            .is_comptime = false,
+                            .name = decl.name,
+                            .type = VtableFieldType(f),
+                        };
+                        idx += 1;
+                    }
+                },
+                else => {},
+            }
         }
     }
     return @Type(.{
