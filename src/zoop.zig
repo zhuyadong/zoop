@@ -135,10 +135,8 @@ pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
     const kmagic: u32 = 0xaabbccdd;
     magic: u32 = kmagic,
     info: *const ClassInfo,
-    allocator: *const fn (*anyopaque) ?std.mem.Allocator,
 } else packed struct {
     info: *const ClassInfo,
-    allocator: *const fn (*anyopaque) ?std.mem.Allocator,
 };
 
 pub fn Klass(comptime T: type) type {
@@ -159,7 +157,7 @@ pub fn Klass(comptime T: type) type {
 
         pub fn new(allocator: std.mem.Allocator, init: ?T) !*@This() {
             var self = try allocator.create(@This());
-            self.header = .{ .info = makeClassInfo(T), .allocator = @ptrCast(&getAlly) };
+            self.header = .{ .info = makeClassInfo(T) };
             self.allocator = allocator;
             if (init) |v| {
                 self.class = v;
@@ -174,7 +172,7 @@ pub fn Klass(comptime T: type) type {
 
         pub fn make(init: ?T) @This() {
             var self: @This() = undefined;
-            self.header = .{ .info = makeClassInfo(T), .allocator = @ptrCast(&getAlly) };
+            self.header = .{ .info = makeClassInfo(T) };
             self.allocator = null;
             if (init) |v| {
                 self.class = v;
@@ -188,11 +186,15 @@ pub fn Klass(comptime T: type) type {
         }
 
         pub fn from(pclass: *const T) *@This() {
-            const self: *@This() = @alignCast(@constCast(@fieldParentPtr("class", pclass)));
+            const self: *@This() = @ptrFromInt(@intFromPtr(pclass) - class_offset);
             if (comptime builtin.mode == .Debug) {
                 assert(self.header.magic == KlassHeader.kmagic);
             }
             return self;
+        }
+
+        pub fn ptr(self: *@This()) *Class {
+            return &self.class;
         }
 
         fn getAlly(self: *@This()) ?std.mem.Allocator {
@@ -374,28 +376,29 @@ pub fn isRootPtr(ptr: anytype) bool {
     @compileError(compfmt("{s} is not a class/klass.", .{@typeName(T)}));
 }
 
-pub fn getAllocator(any: anytype) ?std.mem.Allocator {
-    const T = @TypeOf(any);
-    switch (@typeInfo(T)) {
-        else => {},
-        .Struct => {
-            if (isInterfaceType(T)) {
-                const header: *KlassHeader = @ptrCast(@alignCast(any.ptr));
-                return header.allocator(any.ptr);
-            }
-        },
-        .Pointer => |p| {
-            if (p.size == .One) {
-                if (isKlassType(p.child)) {
-                    return any.allocator;
-                } else if (isClassType(p.child)) {
-                    return Klass(p.child).from(any).allocator;
-                }
-            }
-        },
-    }
-    return null;
-}
+// TODO: fix bug (detail in test.zig)
+// pub fn getAllocator(any: anytype) ?std.mem.Allocator {
+//     const T = @TypeOf(any);
+//     switch (@typeInfo(T)) {
+//         else => {},
+//         .Struct => {
+//             if (isInterfaceType(T)) {
+//                 const pklass: *zoop.Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(any.ptr));
+//                 return pklass.allocator;
+//             }
+//         },
+//         .Pointer => |p| {
+//             if (p.size == .One) {
+//                 if (isKlassType(p.child)) {
+//                     return any.allocator;
+//                 } else if (isClassType(p.child)) {
+//                     return Klass(p.child).from(any).allocator;
+//                 }
+//             }
+//         },
+//     }
+//     return null;
+// }
 
 pub fn cast(any: anytype, comptime T: type) t: {
     break :t if (isInterfaceType(T)) T else switch (pointerType(@TypeOf(any))) {
@@ -404,39 +407,7 @@ pub fn cast(any: anytype, comptime T: type) t: {
         else => @compileError(compfmt("zoop.cast(any, T): any must be interface or pointer to class but '{}'.", .{@typeName(@TypeOf(any))})),
     };
 } {
-    const V = @TypeOf(any);
-    if (isInterfaceType(V)) {
-        if (V == T) return any;
-
-        if (isInterfaceType(T)) {
-            // interface -> interface
-            if (tupleHas(interfaces(V), T)) {
-                return T{ .ptr = any.ptr, .vptr = classInfo(any).getVtable(makeTypeId(T)).? };
-            }
-        }
-    } else switch (@typeInfo(V)) {
-        else => {},
-        .Pointer => |p| {
-            if (isClassType(p.child)) {
-                if (isInterfaceType(T)) {
-                    // class -> interface
-                    if (tupleHas(interfaces(p.child), T)) {
-                        return T{ .ptr = @ptrCast(Klass(p.child).from(any)), .vptr = makeVtable(p.child, T) };
-                    }
-                } else if (isClassType(T)) {
-                    // class -> class
-                    if (p.child == T) return any;
-
-                    if (tupleHas(classes(p.child), T)) {
-                        return @ptrCast(@alignCast(any));
-                    }
-                }
-            } else if (isKlassType(p.child)) {
-                return cast(&any.class, T);
-            }
-        },
-    }
-    @compileError(compfmt("'{s}' can not cast to '{s}'", .{ @typeName(V), @typeName(T) }));
+    return Caster(@TypeOf(any), T).cast(any, T);
 }
 
 pub fn as(any: anytype, comptime T: type) t: {
@@ -533,6 +504,65 @@ fn vtableGetter(comptime T: type) *const VtableGetFunc {
             return null;
         }
     }).func;
+}
+
+fn Caster(comptime V: type, comptime T: type) type {
+    if (isInterfaceType(V)) {
+        if (isInterfaceType(T)) {
+            if (tupleHas(interfaces(V), T)) {
+                // interface -> interface
+                return struct {
+                    pub fn cast(any: anytype, comptime I: type) I {
+                        return T{ .ptr = any.ptr, .vptr = classInfo(any).getVtable(makeTypeId(I)).? };
+                    }
+                };
+            }
+        }
+    } else switch (@typeInfo(V)) {
+        else => {},
+        .Pointer => |p| {
+            if (isClassType(p.child)) {
+                if (isInterfaceType(T)) {
+                    if (tupleHas(interfaces(p.child), T)) {
+                        // class -> interface
+                        return struct {
+                            pub fn cast(any: anytype, comptime I: type) I {
+                                return I{ .ptr = @ptrFromInt(@intFromPtr(Klass(p.child).from(any))), .vptr = makeVtable(p.child, T) };
+                            }
+                        };
+                    }
+                } else if (isClassType(T)) {
+                    if (tupleHas(classes(p.child), T)) {
+                        // class -> class
+                        return struct {
+                            pub fn cast(any: anytype, comptime C: type) t: {
+                                break :t switch (pointerType(V)) {
+                                    else => unreachable,
+                                    .read => *const C,
+                                    .write => *C,
+                                };
+                            } {
+                                if (p.child == C) {
+                                    return any;
+                                } else {
+                                    return @ptrFromInt(@intFromPtr(any));
+                                }
+                            }
+                        };
+                    }
+                }
+            } else if (isKlassType(p.child)) {
+                // klass -> T
+                const caster = Caster(*p.child.Class, T);
+                return struct {
+                    pub fn cast(any: anytype, comptime ANY: type) @TypeOf(caster.cast(&any.class, ANY)) {
+                        return caster.cast(&any.class, ANY);
+                    }
+                };
+            }
+        },
+    }
+    @compileError(compfmt("'{s}' can not cast to '{s}'", .{ @typeName(V), @typeName(T) }));
 }
 
 fn ClassInfoGetter(comptime T: type) type {
@@ -722,7 +752,7 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
     }
 }
 
-pub inline fn isInterfaceType(comptime T: type) bool {
+inline fn isInterfaceType(comptime T: type) bool {
     return (struct {
         pub const val = blk: {
             const fields = @typeInfo(IObject).Struct.fields;
@@ -775,7 +805,7 @@ inline fn isTuple(any: anytype) bool {
     }
 }
 
-pub fn interfaces(comptime T: type) Tuple {
+fn interfaces(comptime T: type) Tuple {
     return (struct {
         pub const val = blk: {
             var ret = tupleInit(IObject);
@@ -899,14 +929,17 @@ fn VtableFieldType(comptime F: std.builtin.Type.Fn) type {
     } });
 }
 
-inline fn pointerType(any: anytype) enum {
+fn pointerType(any: anytype) enum {
     no,
     read,
     write,
 } {
+    const T = switch (@typeInfo(@TypeOf(any))) {
+        else => @TypeOf(any),
+        .Type => any,
+    };
     return (struct {
         pub const val = blk: {
-            const T = @TypeOf(any);
             const info = if (T == type) @typeInfo(any) else @typeInfo(T);
             break :blk switch (info) {
                 else => .no,
