@@ -381,7 +381,7 @@ pub fn getAllocator(any: anytype) ?std.mem.Allocator {
             }
         },
     }
-    return null;
+    @compileError(compfmt("zoop.getAllocator(any) where any must be *klass/*class/interface", .{}));
 }
 
 pub fn cast(any: anytype, comptime T: type) t: {
