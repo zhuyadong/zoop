@@ -114,8 +114,10 @@ pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
     const kmagic: u32 = 0xaabbccdd;
     magic: u32 = kmagic,
     info: *const ClassInfo,
+    allocator: *const fn (*anyopaque) ?std.mem.Allocator,
 } else packed struct {
     info: *const ClassInfo,
+    allocator: *const fn (*anyopaque) ?std.mem.Allocator,
 };
 
 pub fn Klass(comptime T: type) type {
@@ -136,7 +138,7 @@ pub fn Klass(comptime T: type) type {
 
         pub fn new(allocator: std.mem.Allocator, init: ?T) !*@This() {
             var self = try allocator.create(@This());
-            self.header = .{ .info = makeClassInfo(T) };
+            self.header = .{ .info = makeClassInfo(T), .allocator = @ptrCast(&getAlly) };
             self.allocator = allocator;
             if (init) |v| {
                 self.class = v;
@@ -151,7 +153,7 @@ pub fn Klass(comptime T: type) type {
 
         pub fn make(init: ?T) @This() {
             var self: @This() = undefined;
-            self.header = .{ .info = makeClassInfo(T) };
+            self.header = .{ .info = makeClassInfo(T), .allocator = @ptrCast(&getAlly) };
             self.allocator = null;
             if (init) |v| {
                 self.class = v;
@@ -358,29 +360,29 @@ pub fn isRootPtr(ptr: anytype) bool {
     @compileError(compfmt("{s} is not a class/klass.", .{@typeName(T)}));
 }
 
-// TODO: fix bug (detail in test.zig)
-// pub fn getAllocator(any: anytype) ?std.mem.Allocator {
-//     const T = @TypeOf(any);
-//     switch (@typeInfo(T)) {
-//         else => {},
-//         .Struct => {
-//             if (isInterfaceType(T)) {
-//                 const pklass: *zoop.Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(any.ptr));
-//                 return pklass.allocator;
-//             }
-//         },
-//         .Pointer => |p| {
-//             if (p.size == .One) {
-//                 if (isKlassType(p.child)) {
-//                     return any.allocator;
-//                 } else if (isClassType(p.child)) {
-//                     return Klass(p.child).from(any).allocator;
-//                 }
-//             }
-//         },
-//     }
-//     return null;
-// }
+pub fn getAllocator(any: anytype) ?std.mem.Allocator {
+    const T = @TypeOf(any);
+    switch (@typeInfo(T)) {
+        else => {},
+        .Struct => {
+            if (isInterfaceType(T)) {
+                const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(any.ptr));
+                return pklass.header.allocator(any.ptr);
+            }
+        },
+        .Pointer => |p| {
+            if (p.size == .One) {
+                if (isKlassType(p.child)) {
+                    return any.allocator;
+                } else if (isClassType(p.child)) {
+                    const pklass = Klass(p.child).from(any);
+                    return pklass.header.allocator(@ptrFromInt(@intFromPtr(pklass)));
+                }
+            }
+        },
+    }
+    return null;
+}
 
 pub fn cast(any: anytype, comptime T: type) t: {
     break :t if (isInterfaceType(T)) T else switch (pointerType(@TypeOf(any))) {
@@ -659,7 +661,7 @@ fn initClass(pclass: anytype) void {
     const T = std.meta.Child(@TypeOf(pclass));
     const supers = classes(T);
     inline for (supers.items) |V| {
-        const pv: *V = @ptrCast(pclass);
+        const pv: *V = @ptrCast(@alignCast(pclass));
         initDefaultFields(pv);
     }
 }

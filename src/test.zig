@@ -4,21 +4,48 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var allocator = gpa.allocator();
 var p: ?*Sub = null;
 var i: ?IHuman = null;
+fn assert(b: bool) void {
+    if (!b) @panic("assert failed.");
+}
 pub fn main() !void {
-    const s = try zoop.new(allocator, Sub, null);
-    p = s;
-    i = zoop.cast(s, IHuman);
-    const all = .{
-        zoopicall(),
-        zoopasclass(),
-        zoopasiface(),
-        zoopcastclass(),
-        zoopcastiface(),
-    };
-    var l = all.len;
-    if (l > 0) {
-        l = 0;
+    if (false) {
+        const s = try zoop.new(allocator, Sub, null);
+        p = s;
+        i = zoop.cast(s, IHuman);
+        const all = .{
+            zoopicall(),
+            zoopasclass(),
+            zoopasiface(),
+            zoopcastclass(),
+            zoopcastiface(),
+        };
+        var l = all.len;
+        if (l > 0) {
+            l = 0;
+        }
     }
+
+    var custom = zoop.make(Custom, null);
+    custom.class.init("sub");
+    var intbase = @intFromPtr(&custom);
+    var intss = @intFromPtr(klassPtr(&custom.class.super));
+    var ints = @intFromPtr(klassPtr(&custom.class.super.super));
+    var inth = @intFromPtr(klassPtr(&custom.class.super.super.super));
+    assert(intbase == intss);
+    assert(intbase == ints);
+    assert(intbase == inth);
+    intbase = @intFromPtr(&custom.class);
+    intss = @intFromPtr(&custom.class.super);
+    ints = @intFromPtr(&custom.class.super.super);
+    inth = @intFromPtr(&custom.class.super.super.super);
+    assert(intbase == intss);
+    assert(intbase == ints);
+    assert(intbase == inth);
+    assert(zoop.isRootPtr(&custom));
+    assert(zoop.isRootPtr(&custom.class));
+    assert(!zoop.isRootPtr(&custom.class.super));
+    assert(!zoop.isRootPtr(zoop.Klass(Sub).from(@ptrCast(@alignCast(&custom.class.super.super)))));
+    assert(custom.class.super.super.offset() == 0);
 }
 
 fn zoopicall() @TypeOf(zoop.icall(i.?, "getName", .{})) {
@@ -53,22 +80,23 @@ pub const IHuman = struct {
 };
 
 pub const Human = struct {
+    const HumanPtr = *align(zoop.alignment) Human;
     age: u8 align(zoop.alignment) = 99,
     name: []const u8 = "default",
 
-    pub fn init(self: *Human, name: []const u8) void {
+    pub fn init(self: HumanPtr, name: []const u8) void {
         self.name = name;
     }
 
-    pub fn deinit(self: *Human) void {
+    pub fn deinit(self: HumanPtr) void {
         self.name = "";
     }
 
-    pub fn getName(self: *const Human) []const u8 {
+    pub fn getName(self: HumanPtr) []const u8 {
         return self.name;
     }
 
-    pub fn setName(self: *Human, name: []const u8) void {
+    pub fn setName(self: HumanPtr, name: []const u8) void {
         self.name = name;
     }
 };
@@ -79,11 +107,15 @@ pub const Sub = struct {
     super: Human align(zoop.alignment),
     age: u65 = 99,
 
-    pub fn init(self: *Sub, name: []const u8) void {
+    pub fn init(self: *align(zoop.alignment) Sub, name: []const u8) void {
         self.super.init(name);
+        const n = self.super.getName();
+        if (n.len < 0) @panic("message: []const u8");
     }
 
     pub fn offset(self: *Sub) usize {
+        const n = self.super.getName();
+        if (n.len < 0) @panic("message: []const u8");
         return @intFromPtr(&self.super) - @intFromPtr(self);
     }
 };
@@ -91,7 +123,7 @@ pub const Sub = struct {
 pub const SubSub = struct {
     super: Sub align(zoop.alignment),
 
-    pub fn init(self: *SubSub, name: []const u8) void {
+    pub fn init(self: *align(zoop.alignment) SubSub, name: []const u8) void {
         self.super.init(name);
     }
 
@@ -118,7 +150,7 @@ pub const Custom = struct {
 };
 
 fn klassPtr(any: anytype) *zoop.Klass(std.meta.Child(@TypeOf(any))) {
-    return zoop.Klass(std.meta.Child(@TypeOf(any))).from(any);
+    return zoop.Klass(std.meta.Child(@TypeOf(any))).from(@ptrCast(@alignCast(any)));
 }
 
 test "zoop" {
@@ -233,30 +265,30 @@ test "zoop" {
         // test heap address
         var psubsub = try zoop.new(t.allocator, SubSub, null);
         ihuman = zoop.cast(psubsub, IHuman);
+        const ksubsub = zoop.Klass(SubSub).from(psubsub);
+        try t.expect(@intFromPtr(ihuman.ptr) == @intFromPtr(ksubsub));
         try t.expectEqualStrings(ihuman.getName(), "default");
         const ph: *Human = @ptrCast(psubsub);
         try t.expect(@intFromPtr(ph) == @intFromPtr(psubsub));
-        // const pkhuman = zoop.Klass(Human).from(ph);
         const pklass: *zoop.Klass(struct { x: u128 align(zoop.alignment) }) = @ptrFromInt(@intFromPtr(ihuman.ptr));
         const pksubsub: *zoop.Klass(SubSub) = @ptrFromInt(@intFromPtr(pklass));
-        // const pksubsub2: *zoop.Klass(SubSub) = @ptrFromInt(@intFromPtr(pkhuman));
         try t.expect(@intFromPtr(pklass) == @intFromPtr(pksubsub));
         try t.expect(@intFromPtr(pklass) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
         try t.expect(pklass.allocator != null);
         try t.expect(@intFromPtr(ihuman.ptr) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
         try t.expect(@intFromPtr(zoop.Klass(Human).from(&psubsub.super.super)) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
         try t.expect(@intFromPtr(zoop.Klass(Sub).from(&psubsub.super)) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
-        zoop.destroy(psubsub);
 
         //TODO: fix zoop.getAllocator() bug to pass tests below
-        // try t.expect(zoop.getAllocator(ihuman).?.ptr == t.allocator.ptr);
-        // try t.expect(zoop.getAllocator(ihuman).?.ptr == zoop.getAllocator(psubsub).?.ptr);
-        // try t.expect(zoop.getAllocator(psubsub).?.ptr == t.allocator.ptr);
-        // try t.expect(zoop.getAllocator(&psubsub.super) != null);
-        // try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super).?.ptr);
-        // try t.expect(zoop.getAllocator(&psubsub.super.super) != null);
-        // try t.expect(zoop.getAllocator(zoop.cast(psubsub, zoop.IObject)) != null);
-        // try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super.super).?.ptr);
+        try t.expect(zoop.getAllocator(ihuman).?.ptr == t.allocator.ptr);
+        try t.expect(zoop.getAllocator(ihuman).?.ptr == zoop.getAllocator(psubsub).?.ptr);
+        try t.expect(zoop.getAllocator(psubsub).?.ptr == t.allocator.ptr);
+        try t.expect(zoop.getAllocator(&psubsub.super).?.ptr == t.allocator.ptr);
+        try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super).?.ptr);
+        try t.expect(zoop.getAllocator(&psubsub.super.super).?.ptr == t.allocator.ptr);
+        try t.expect(zoop.getAllocator(zoop.cast(psubsub, zoop.IObject)).?.ptr == t.allocator.ptr);
+        try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super.super).?.ptr);
+        zoop.destroy(ihuman);
 
         // test destroy
         psubsub = try zoop.new(t.allocator, SubSub, null);
