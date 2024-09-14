@@ -595,7 +595,7 @@ fn ClassInfoGetter(comptime T: type) type {
             if (isClassType(p.child)) {
                 return struct {
                     pub fn get(class: anytype) *const ClassInfo {
-                        return Klass(p.child).from(@ptrCast(class)).header.info;
+                        return Klass(p.child).from(class).header.info;
                     }
                 };
             }
@@ -604,7 +604,7 @@ fn ClassInfoGetter(comptime T: type) type {
             if (isInterfaceType(T)) {
                 return struct {
                     pub fn get(iface: anytype) *const ClassInfo {
-                        const pheader: *KlassHeader = @ptrCast(@alignCast(iface.ptr));
+                        const pheader: *KlassHeader = @ptrFromInt(@intFromPtr(iface.ptr));
                         return pheader.info;
                     }
                 };
