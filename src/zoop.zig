@@ -219,7 +219,9 @@ pub fn Vtable(comptime I: type) type {
     }
     const ifaces = interfaces(I);
     comptime var vtables: [ifaces.items.len]type = undefined;
-    comptime var nfield: comptime_int = 0;
+    // ifaces.items.len - 1 for saving pointer to super interfaces vtable, -1 for I itself,
+    // can make interface to interface casting faster.
+    comptime var nfield: comptime_int = ifaces.items.len - 1;
 
     inline for (ifaces.items, 0..) |iface, i| {
         vtables[i] = VtableDirect(iface);
@@ -228,6 +230,18 @@ pub fn Vtable(comptime I: type) type {
 
     comptime var allfields: [nfield]StructField = undefined;
     comptime var idx: comptime_int = 0;
+    for (ifaces.items) |iface| {
+        if (iface != I) {
+            allfields[idx] = StructField{
+                .alignment = @alignOf(*Vtable(iface)),
+                .default_value = null,
+                .is_comptime = false,
+                .name = @typeName(iface),
+                .type = *Vtable(iface),
+            };
+            idx += 1;
+        }
+    }
     for (vtables) |vt| {
         const fields = @typeInfo(vt).Struct.fields;
         for (fields) |field| {
@@ -514,7 +528,9 @@ fn Caster(comptime V: type, comptime T: type) type {
                 // interface -> interface
                 return struct {
                     pub fn cast(any: anytype, comptime I: type) I {
-                        return T{ .ptr = any.ptr, .vptr = classInfo(any).getVtable(makeTypeId(I)).? };
+                        if (V == I) return any;
+                        const vtable: *Vtable(V) = @ptrFromInt(@intFromPtr(any.vptr));
+                        return T{ .ptr = any.ptr, .vptr = @field(vtable, @typeName(I)) };
                     }
                 };
             }
@@ -740,10 +756,17 @@ fn makeTypeId(comptime T: type) type_id {
 
 fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
     const VT = Vtable(I);
+    const ifaces = interfaces(I);
+    const nsuper = ifaces.items.len - 1;
     return @constCast(&(struct {
         pub const vt: VT = blk: {
             var val: VT = undefined;
-            for (std.meta.fields(VT)[0..]) |field| {
+            for (ifaces.items) |iface| {
+                if (iface != I) {
+                    @field(val, @typeName(iface)) = @ptrCast(@alignCast(makeVtable(T, iface)));
+                }
+            }
+            for (std.meta.fields(VT)[nsuper..]) |field| {
                 const MT = MethodType(T, field.name);
                 if (MT != void) {
                     checkApi(T, I, field.name);

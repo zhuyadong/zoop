@@ -64,7 +64,17 @@ fn zoopcastclass() @TypeOf(zoop.cast(p.?, Human)) {
     return zoop.cast(p.?, Human);
 }
 
+pub const IAge = struct {
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+
+    pub fn getAge(self: IAge) u8 {
+        return zoop.icall(self, "getAge", .{});
+    }
+};
+
 pub const IHuman = struct {
+    pub const extends = .{IAge};
     ptr: *anyopaque,
     vptr: *anyopaque,
 
@@ -99,6 +109,10 @@ pub const Human = struct {
 
     pub fn setName(self: HumanPtr, name: []const u8) void {
         self.name = name;
+    }
+
+    pub fn getAge(self: HumanPtr) u8 {
+        return self.age;
     }
 
     pub fn formatAny(self: HumanPtr, writer: std.io.AnyWriter) anyerror!void {
@@ -163,6 +177,10 @@ fn klassPtr(any: anytype) *zoop.Klass(std.meta.Child(@TypeOf(any))) {
 
 test "zoop" {
     const t = std.testing;
+    // const VT = zoop.Vtable(IHuman);
+    // inline for (std.meta.fields(VT)) |field| {
+    //     std.debug.print("{s} {}\n", .{ field.name, field.type });
+    // }
 
     if (true) {
         // test interface excludes
@@ -255,6 +273,11 @@ test "zoop" {
         try t.expectEqualStrings(zoop.getField(&custom, "name", []const u8).*, "sub");
         ihuman = zoop.as(zoop.as(&custom, zoop.IObject).?, IHuman).?;
         try t.expectEqualStrings(ihuman.getName(), "custom");
+
+        // test interface -> interface
+        const iage = zoop.cast(ihuman, IAge);
+        try t.expect(iage.getAge() == 99);
+        try t.expect(zoop.cast(iage, IAge).getAge() == 99);
 
         // test deinit()
         zoop.destroy(&human);
