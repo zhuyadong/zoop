@@ -943,7 +943,7 @@ fn VtableDirect(comptime I: type) type {
             const info = @typeInfo(@TypeOf(@field(I, decl.name)));
             switch (info) {
                 .Fn => |f| {
-                    if (f.params.len > 0 and f.params[0].type == I) {
+                    if (!f.is_generic and f.params.len > 0 and f.params[0].type == I) {
                         fields[idx] = StructField{
                             .alignment = @alignOf(VtableFieldType(f)),
                             .default_value = null,

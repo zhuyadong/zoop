@@ -71,6 +71,14 @@ pub const IAge = struct {
     pub fn getAge(self: IAge) u8 {
         return zoop.icall(self, "getAge", .{});
     }
+
+    pub fn cast(self: IAge, comptime T: type) @TypeOf(zoop.cast(self, T)) {
+        return zoop.cast(self, T);
+    }
+
+    pub fn as(self: IAge, comptime T: type) @TypeOf(zoop.as(self, T)) {
+        return zoop.as(self, T);
+    }
 };
 
 pub const IHuman = struct {
@@ -86,6 +94,14 @@ pub const IHuman = struct {
     pub fn setName(self: IHuman, name: []const u8) void {
         zoop.icall(self, "setName", .{name});
         // zoop.vptr(self).setName(zoop.cptr(self), name);
+    }
+
+    pub fn cast(self: IHuman, comptime T: type) @TypeOf(zoop.cast(self, T)) {
+        return zoop.cast(self, T);
+    }
+
+    pub fn as(self: IHuman, comptime T: type) @TypeOf(zoop.as(self, T)) {
+        return zoop.as(self, T);
     }
 };
 
@@ -275,9 +291,9 @@ test "zoop" {
         try t.expectEqualStrings(ihuman.getName(), "custom");
 
         // test interface -> interface
-        const iage = zoop.cast(ihuman, IAge);
+        const iage = ihuman.cast(IAge); //zoop.cast(ihuman, IAge);
         try t.expect(iage.getAge() == 99);
-        try t.expect(zoop.cast(iage, IAge).getAge() == 99);
+        try t.expect(iage.cast(IAge).getAge() == 99);
 
         // test deinit()
         zoop.destroy(&human);
