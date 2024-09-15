@@ -535,6 +535,7 @@ fn Caster(comptime V: type, comptime T: type) type {
                         // class -> interface
                         return struct {
                             pub fn cast(any: anytype, comptime I: type) I {
+                                assert(isRootPtr(any));
                                 return I{ .ptr = @ptrFromInt(@intFromPtr(Klass(p.child).from(any))), .vptr = makeVtable(p.child, T) };
                             }
                         };
