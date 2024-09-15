@@ -80,6 +80,7 @@ pub const IHuman = struct {
 };
 
 pub const Human = struct {
+    pub const extends = .{zoop.IFormat};
     const HumanPtr = *align(zoop.alignment) Human;
     age: u8 align(zoop.alignment) = 99,
     name: []const u8 = "default",
@@ -100,8 +101,11 @@ pub const Human = struct {
         self.name = name;
     }
 
-    pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("Human{{.age = {}, .name='{s}'}}", .{ self.age, self.name });
+    pub fn formatAny(self: HumanPtr, writer: std.io.AnyWriter) anyerror!void {
+        const classinfo = zoop.classInfo(self);
+        try writer.print("{s}{{.age = {}, .name='{s}'}}\n", .{ classinfo.typeinfo.typename, self.age, self.name });
+        const ilist = &.{ 1, 2, 3, 4 };
+        try zoop.format(ilist, writer);
     }
 };
 

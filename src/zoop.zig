@@ -58,8 +58,18 @@ pub const Nil = struct {
 pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
+
     pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try zoop.format(self.*, writer);
+        try zoop.format(self, writer);
+    }
+};
+
+pub const IFormat = struct {
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+
+    pub fn formatAny(self: IFormat, writer: std.io.AnyWriter) anyerror!void {
+        try icall(self, "formatAny", .{writer});
     }
 };
 
@@ -439,30 +449,13 @@ pub fn isNil(any: anytype) bool {
     return any.ptr == Nil.ptr();
 }
 
-pub fn format(any: anytype, writer: anytype) anyerror!void {
-    const classinfo = classInfo(any);
-    const anywriter = if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any();
-    const ptr: *anyopaque = blk: {
-        const T = @TypeOf(any);
-        switch (@typeInfo(T)) {
-            else => {},
-            .Struct => {
-                if (isInterfaceType(T)) {
-                    const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(any.ptr));
-                    break :blk @ptrFromInt(@intFromPtr(pklass) + pklass.header.info.offset);
-                }
-            },
-            .Pointer => |p| switch (p.size) {
-                else => {},
-                .One => {
-                    if (isKlassType(p.child)) break :blk @ptrCast(&any.class);
-                    if (isClassType(p.child)) break :blk @ptrCast(any);
-                },
-            },
-        }
-        @compileError("zoop.format(any): any must be interface/*class/*klass.");
-    };
-    try classinfo.typeinfo.format(ptr, anywriter);
+pub fn format(ptr: anytype, writer: anytype) anyerror!void {
+    comptime {
+        if (@typeInfo(@TypeOf(ptr)) != .Pointer) @compileError("zoop.format(ptr) where ptr must be a pointer.");
+    }
+    const T = std.meta.Child(@TypeOf(ptr));
+    const typeinfo = typeInfo(T);
+    try typeinfo.format(@ptrCast(@constCast(ptr)), if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any());
 }
 
 //===== private content ======
@@ -628,7 +621,25 @@ fn ClassInfoGetter(comptime T: type) type {
 }
 
 fn formatFunc(comptime T: type) *const FormatFunc {
-    return (struct {
+    if (isInterfaceType(T)) return (struct {
+        pub fn func(piface: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
+            const self: *T = @ptrCast(@alignCast(piface));
+            if (zoop.as(self.*, IFormat)) |iformat| {
+                try icall(iformat, "formatAny", .{writer});
+            } else {
+                try writer.print("{any}", .{self.*});
+            }
+        }
+    }).func else if (isClassType(T) or isKlassType(T)) return (struct {
+        pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
+            const self: *T = @ptrCast(@alignCast(pself));
+            if (zoop.as(self, IFormat)) |iformat| {
+                try icall(iformat, "formatAny", .{writer});
+            } else {
+                try writer.print("{any}", .{self});
+            }
+        }
+    }).func else return (struct {
         pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
             const self: *T = @ptrCast(@alignCast(pself));
             try writer.print("{any}", .{self});
