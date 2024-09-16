@@ -94,30 +94,50 @@ pub fn getField(any: anytype, comptime name: []const u8, comptime T: type) *T {
     }
 }
 
+/// get method of klass/class
 pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
     comptime {
-        if (!isClassType(T)) @compileError(compfmt("{s} is not an class type.", .{@typeName(T)}));
-    }
-    return (struct {
-        pub const method = blk: {
-            var Cur = T;
-            while (Cur != void) {
-                if (@hasDecl(Cur, name)) {
-                    const FT = @TypeOf(@field(Cur, name));
-                    if (@typeInfo(FT) == .Fn) {
-                        break :blk @field(Cur, name);
+        if (!isClassType(T) and !isKlassType(T)) @compileError(compfmt("{s} is not an klass/class type.", .{@typeName(T)}));
+
+        return (struct {
+            pub const method = blk: {
+                var Cur = if (isKlassType(T)) T.Class else T;
+                while (Cur != void) {
+                    if (@hasDecl(Cur, name)) {
+                        const FT = @TypeOf(@field(Cur, name));
+                        if (@typeInfo(FT) == .Fn) {
+                            break :blk @field(Cur, name);
+                        }
+                    }
+                    const fields = @typeInfo(Cur).Struct.fields;
+                    if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+                        Cur = fields[0].type;
+                    } else {
+                        Cur = void;
                     }
                 }
-                const fields = @typeInfo(Cur).Struct.fields;
-                if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
-                    Cur = fields[0].type;
-                } else {
-                    Cur = void;
-                }
+                break :blk void;
+            };
+        }).method;
+    }
+}
+
+/// get method of klass/class' super class
+pub fn getUpMethod(comptime T: type, comptime name: []const u8) UpMethodType(T, name) {
+    comptime {
+        if (!isClassType(T) and !isKlassType(T)) @compileError(compfmt("{s} is not an klass/class type.", .{@typeName(T)}));
+
+        const Class = if (isKlassType(T)) T.Class else T;
+        const Super = blk: {
+            const fields = @typeInfo(Class).Struct.fields;
+            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+                break :blk fields[0].type;
+            } else {
+                break :blk void;
             }
-            break :blk void;
         };
-    }).method;
+        return getMethod(Super, name);
+    }
 }
 
 pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
@@ -364,6 +384,8 @@ pub fn make(comptime T: type, init: ?T) Klass(T) {
     return Klass(T).make(init);
 }
 
+/// call interface method
+/// example: zoop.icall(ihuman, "getAge", .{})
 pub fn icall(iface: anytype, comptime method: []const u8, args: anytype) ReturnType(@TypeOf(iface), method) {
     comptime {
         if (!isInterfaceType(@TypeOf(iface))) @compileError(compfmt("'{s}' is not an interface type.", .{@typeName(@TypeOf(iface))}));
@@ -372,6 +394,58 @@ pub fn icall(iface: anytype, comptime method: []const u8, args: anytype) ReturnT
     const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(iface.ptr));
     const ptr: *anyopaque = @ptrFromInt(@intFromPtr(pklass) + pklass.header.info.offset);
     return @call(.auto, @field(vptr, method), .{ptr} ++ args);
+}
+
+/// call interface method of klass/class. (virtual call)
+/// example: zoop.vcall(pclass, IHuman.getName, .{})
+pub fn vcall(any: anytype, comptime method: anytype, args: anytype) MethodInfo(method).Return {
+    comptime {
+        var pass = false;
+        switch (@typeInfo(@TypeOf(any))) {
+            else => {},
+            .Struct => pass = isInterfaceType(@TypeOf(any)),
+            .Pointer => |p| {
+                pass = isKlassType(p.child) or isClassType(p.child);
+            },
+        }
+        if (!pass) @compileError("vcall(any) where any must be *class/*klass/interface");
+    }
+    const info = MethodInfo(method);
+    if (canCast(@TypeOf(any), info.Iface)) {
+        return icall(zoop.cast(any, info.Iface), info.name, args);
+    }
+    if (zoop.as(any, info.Iface)) |iface| {
+        return icall(iface, info.name, args);
+    }
+    @panic(StackBuf(2048).init().print("{s} don't support method: {s}.{s}", .{ @typeName(@TypeOf(any)), @typeName(info.Iface), info.name }));
+}
+
+/// call super class's method.
+/// example: zoop.upcall(pclass, "methodOfSuperClass", .{});
+pub fn upcall(any: anytype, comptime name: []const u8, args: anytype) t: {
+    const T = @TypeOf(any);
+    switch (@typeInfo(T)) {
+        else => {},
+        .Pointer => |p| {
+            if (isKlassType(p.child) or isClassType(p.child)) {
+                const Class = if (isKlassType(p.child)) p.child.Class else p.child;
+                const MT = UpMethodType(Class, name);
+                if (MT != void) {
+                    break :t @typeInfo(MT).Fn.return_type orelse void;
+                } else {
+                    @compileError(compfmt("no method named '{s}' founded in inherit tree of {s}.", .{ name, @typeName(Class) }));
+                }
+            }
+        },
+    }
+    @compileError("upcall(any, ...) where any must be *class/*klass.");
+} {
+    const T = comptime std.meta.Child(@TypeOf(any));
+    const Class = comptime if (isKlassType(T)) T.Class else T;
+    const method = comptime getUpMethod(Class, name);
+    const Ptr = comptime @typeInfo(@TypeOf(method)).Fn.params[0].type.?;
+    const ptr: Ptr = @ptrCast(if (isKlassType(T)) &any.class else any);
+    return @call(.auto, method, .{ptr} ++ args);
 }
 
 pub fn isRootPtr(ptr: anytype) bool {
@@ -415,7 +489,11 @@ pub fn cast(any: anytype, comptime T: type) t: {
         else => @compileError(compfmt("zoop.cast(any, T): any must be interface or pointer to class but '{}'.", .{@typeName(@TypeOf(any))})),
     };
 } {
-    return Caster(@TypeOf(any), T).cast(any, T);
+    const caster = comptime Caster(@TypeOf(any), T);
+    if (caster != void) {
+        return caster.cast(any, T);
+    }
+    @compileError(compfmt("'{s}' can not cast to '{s}'", .{ @typeName(@TypeOf(any)), @typeName(T) }));
 }
 
 pub fn as(any: anytype, comptime T: type) t: {
@@ -495,7 +573,7 @@ fn vtableGetter(comptime T: type) *const VtableGetFunc {
 
 fn MethodType(comptime T: type, comptime name: []const u8) type {
     comptime {
-        var Cur = T;
+        var Cur = if (isKlassType(T)) T.Class else T;
         while (Cur != void) {
             if (@hasDecl(Cur, name)) {
                 const FT = @TypeOf(@field(Cur, name));
@@ -514,11 +592,51 @@ fn MethodType(comptime T: type, comptime name: []const u8) type {
     }
 }
 
+fn UpMethodType(comptime T: type, comptime name: []const u8) type {
+    comptime {
+        const Class = if (isKlassType(T)) T.Class else T;
+        const Super = blk: {
+            const fields = @typeInfo(Class).Struct.fields;
+            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+                break :blk fields[0].type;
+            } else {
+                break :blk void;
+            }
+        };
+        return if (Super == void) void else MethodType(Super, name);
+    }
+}
+
 fn ReturnType(comptime I: type, comptime method: []const u8) type {
     comptime {
         if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
     }
     return @typeInfo(@TypeOf(@field(I, method))).Fn.return_type orelse void;
+}
+
+fn MethodInfo(comptime method: anytype) type {
+    comptime {
+        const info = @typeInfo(@TypeOf(method));
+        if (info != .Fn) @compileError("method is not a .Fn");
+        if (info.Fn.params.len == 0 or !isInterfaceType(info.Fn.params[0].type.?))
+            @compileError(compfmt("{s} is not an interface type.", .{@typeName(info.Fn.params[0].type.?)}));
+
+        const I = info.Fn.params[0].type orelse unreachable;
+        const method_name = blk: {
+            for (std.meta.declarations(I)) |decl| {
+                if (@TypeOf(@field(I, decl.name)) == @TypeOf(method)) {
+                    if (@field(I, decl.name) == method)
+                        break :blk decl.name;
+                }
+            }
+            unreachable;
+        };
+        return struct {
+            pub const Iface = I;
+            pub const Return = @typeInfo(@TypeOf(method)).Fn.return_type orelse void;
+            pub const name = method_name;
+        };
+    }
 }
 
 fn Caster(comptime V: type, comptime T: type) type {
@@ -584,7 +702,7 @@ fn Caster(comptime V: type, comptime T: type) type {
             }
         },
     }
-    @compileError(compfmt("'{s}' can not cast to '{s}'", .{ @typeName(V), @typeName(T) }));
+    return void;
 }
 
 fn ClassInfoGetter(comptime T: type) type {
@@ -987,6 +1105,21 @@ fn VtableFieldType(comptime F: std.builtin.Type.Fn) type {
     } });
 }
 
+fn StackBuf(comptime N: usize) type {
+    return struct {
+        buf: [N]u8 = undefined,
+
+        pub fn init() @This() {
+            return @This(){};
+        }
+
+        pub fn print(self: *const @This(), comptime fmt: []const u8, args: anytype) []const u8 {
+            var this = @constCast(self);
+            return std.fmt.bufPrint(&this.buf, fmt, args) catch @panic("FMT ERROR");
+        }
+    };
+}
+
 fn pointerType(any: anytype) enum {
     no,
     read,
@@ -1003,6 +1136,14 @@ fn pointerType(any: anytype) enum {
                 else => .no,
                 .Pointer => |p| if (p.is_const) .read else .write,
             };
+        };
+    }).val;
+}
+
+inline fn canCast(comptime V: type, comptime T: type) bool {
+    return (struct {
+        pub const val = blk: {
+            break :blk Caster(V, T) != void;
         };
     }).val;
 }

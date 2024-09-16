@@ -182,6 +182,11 @@ pub const Custom = struct {
         return "custom";
     }
 
+    // override
+    pub fn getAge(_: *Custom) u8 {
+        return 88;
+    }
+
     pub fn offset(self: *Custom) usize {
         return @intFromPtr(&self.super) - @intFromPtr(self);
     }
@@ -292,8 +297,17 @@ test "zoop" {
 
         // test interface -> interface
         const iage = ihuman.cast(IAge); //zoop.cast(ihuman, IAge);
-        try t.expect(iage.getAge() == 99);
-        try t.expect(iage.cast(IAge).getAge() == 99);
+        try t.expect(iage.getAge() == 88);
+        try t.expect(iage.cast(IAge).getAge() == 88);
+
+        // test call
+        try t.expectEqualStrings(zoop.vcall(iage, IHuman.getName, .{}), "custom");
+        try t.expect(zoop.vcall(&custom, IAge.getAge, .{}) == 88);
+        try t.expect(zoop.vcall(custom.ptr(), IAge.getAge, .{}) == 88);
+        try t.expect(zoop.vcall(ihuman, IAge.getAge, .{}) == 88);
+        try t.expect(zoop.upcall(&custom, "getAge", .{}) == 99);
+        try t.expect(zoop.upcall(custom.ptr(), "getAge", .{}) == 99);
+        try t.expect(zoop.icall(iage, "getAge", .{}) == 88);
 
         // test deinit()
         zoop.destroy(&human);
