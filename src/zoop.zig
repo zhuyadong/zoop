@@ -12,7 +12,6 @@ const zoop = @This();
 //===== public content ======
 pub const alignment = @alignOf(KlassHeader);
 pub const type_id = *const anyopaque;
-pub const VtableGetFunc = fn (iface_id: type_id) ?*anyopaque;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
 pub const TypeInfoGetFunc = fn () *const ClassInfo;
 pub const FormatFunc = fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void;
@@ -23,16 +22,34 @@ var destroy_hook_func: ?HookFunc = null;
 var new_hook_func: ?HookFunc = null;
 
 pub const ClassInfo = struct {
+    pub const VtableInfo = struct {
+        typeid: type_id,
+        vtable: *anyopaque,
+    };
+    vtables: []const VtableInfo,
     /// class's typeinfo
     typeinfo: *const TypeInfo,
     /// offset to class in klass
     offset: usize,
-    /// get vtable by interface typeid
-    getVtable: *const VtableGetFunc,
     /// check if can cast to other class
     isClass: *const ClassCheckFunc,
     /// call class and all super classes's deinit() and free mem if need
     deinit: *const fn (pklass: *anyopaque) void,
+
+    pub fn getVtable(self: *const ClassInfo, iface_typeid: type_id) ?*anyopaque {
+        for (self.vtables) |*item| {
+            if (item.typeid == iface_typeid) return item.vtable;
+        }
+        return null;
+    }
+
+    pub fn getVtableOf(self: *const ClassInfo, comptime T: type, comptime I: type) *Vtable(I) {
+        comptime {
+            if (!tupleHas(interfaces(T), I)) @compileError(compfmt("{s} don't support interface:{s}", .{ @typeName(T), @typeName(I) }));
+        }
+        assert(interfaceIndex(T, I) < self.vtables.len);
+        return @ptrCast(@alignCast(self.vtables[interfaceIndex(T, I)].vtable));
+    }
 };
 
 pub const TypeInfo = struct {
@@ -551,26 +568,6 @@ pub fn format(ptr: anytype, writer: anytype) anyerror!void {
 }
 
 //===== private content ======
-fn vtableGetter(comptime T: type) *const VtableGetFunc {
-    comptime {
-        if (!isClassType(T)) @compileError("unsupport type: " ++ @typeName(T));
-    }
-    const ifaces = interfaces(T);
-    const KV = struct { typeid: type_id, vtable: *anyopaque };
-    comptime var kvs: [ifaces.items.len]KV = undefined;
-    inline for (ifaces.items, 0..) |iface, i| {
-        kvs[i] = .{ .typeid = makeTypeId(iface), .vtable = @ptrCast(makeVtable(T, iface)) };
-    }
-    return (struct {
-        pub fn func(iface_id: type_id) ?*anyopaque {
-            for (kvs) |kv| {
-                if (kv.typeid == iface_id) return kv.vtable;
-            }
-            return null;
-        }
-    }).func;
-}
-
 fn MethodType(comptime T: type, comptime name: []const u8) type {
     comptime {
         var Cur = if (isKlassType(T)) T.Class else T;
@@ -662,8 +659,8 @@ fn Caster(comptime V: type, comptime T: type) type {
                         // class -> interface
                         return struct {
                             pub fn cast(any: anytype, comptime I: type) I {
-                                assert(isRootPtr(any));
-                                return I{ .ptr = @ptrFromInt(@intFromPtr(Klass(p.child).from(any))), .vptr = makeVtable(p.child, T) };
+                                const pklass = Klass(p.child).from(any);
+                                return I{ .ptr = @ptrCast(pklass), .vptr = pklass.header.info.getVtableOf(p.child, I) };
                             }
                         };
                     }
@@ -844,12 +841,28 @@ fn classChecker(comptime T: type) *const ClassCheckFunc {
     }).func;
 }
 
+fn makeClassVtables(comptime T: type) []const ClassInfo.VtableInfo {
+    const ifaces = interfaces(T);
+    return @ptrCast((struct {
+        pub const val: [ifaces.items.len]ClassInfo.VtableInfo = blk: {
+            var vtables: [ifaces.items.len]ClassInfo.VtableInfo = undefined;
+            for (ifaces.items, 0..) |iface, i| {
+                vtables[i] = .{
+                    .typeid = makeTypeId(iface),
+                    .vtable = @ptrCast(makeVtable(T, iface)),
+                };
+            }
+            break :blk vtables;
+        };
+    }).val[0..]);
+}
+
 fn makeClassInfo(comptime T: type) *const ClassInfo {
     return &(struct {
         pub const info: ClassInfo = .{
+            .vtables = makeClassVtables(T),
             .offset = Klass(T).class_offset,
             .typeinfo = makeTypeInfo(T),
-            .getVtable = vtableGetter(T),
             .isClass = classChecker(T),
             .deinit = @ptrCast(&Klass(T).deinit),
         };
@@ -970,47 +983,59 @@ inline fn isTuple(any: anytype) bool {
     }
 }
 
+fn interfaceIndex(comptime T: type, comptime I: type) usize {
+    return (struct {
+        pub const index = blk: {
+            const ifaces = interfaces(T);
+            for (ifaces.items, 0..) |iface, i| {
+                if (iface == I) break :blk i;
+            }
+            @compileError(compfmt("{s} don't support interface:{s}", .{ @typeName(T), @typeName(I) }));
+        };
+    }).index;
+}
+
 fn interfaces(comptime T: type) Tuple {
     return (struct {
         pub const val = blk: {
             var ret = tupleInit(IObject);
 
             if (isInterfaceType(T)) {
+                if (@hasDecl(T, "extends")) {
+                    const extends = @field(T, "extends");
+                    switch (@typeInfo(@TypeOf(extends))) {
+                        else => {},
+                        .Struct => |s| {
+                            if (s.is_tuple) {
+                                for (extends) |iface| {
+                                    if (isInterfaceType(iface)) {
+                                        ret = tupleAppendUnique(ret, interfaces(iface));
+                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                                }
+                            }
+                        },
+                    }
+                }
                 ret = tupleAppendUnique(ret, T);
-                if (@hasDecl(T, "extends")) {
-                    const extends = @field(T, "extends");
-                    switch (@typeInfo(@TypeOf(extends))) {
-                        else => {},
-                        .Struct => |s| {
-                            if (s.is_tuple) {
-                                for (extends) |iface| {
-                                    if (isInterfaceType(iface)) {
-                                        ret = tupleAppendUnique(ret, interfaces(iface));
-                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
-                                }
-                            }
-                        },
-                    }
-                }
             } else if (isClassType(T)) {
-                if (@hasDecl(T, "extends")) {
-                    const extends = @field(T, "extends");
-                    switch (@typeInfo(@TypeOf(extends))) {
-                        else => {},
-                        .Struct => |s| {
-                            if (s.is_tuple) {
-                                for (extends) |iface| {
-                                    if (isInterfaceType(iface)) {
-                                        ret = tupleAppendUnique(ret, interfaces(iface));
-                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
-                                }
-                            }
-                        },
-                    }
-                }
                 const fields = std.meta.fields(T);
                 if (fields.len > 0 and isClassType(fields[0].type)) {
                     ret = tupleAppendUnique(ret, interfaces(fields[0].type));
+                }
+                if (@hasDecl(T, "extends")) {
+                    const extends = @field(T, "extends");
+                    switch (@typeInfo(@TypeOf(extends))) {
+                        else => {},
+                        .Struct => |s| {
+                            if (s.is_tuple) {
+                                for (extends) |iface| {
+                                    if (isInterfaceType(iface)) {
+                                        ret = tupleAppendUnique(ret, interfaces(iface));
+                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                                }
+                            }
+                        },
+                    }
                 }
             }
 

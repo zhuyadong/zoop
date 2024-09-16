@@ -81,19 +81,31 @@ pub const IAge = struct {
     }
 };
 
-pub const IHuman = struct {
+pub const ISetName = struct {
     pub const extends = .{IAge};
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+
+    pub fn setName(self: ISetName, name: []const u8) void {
+        zoop.icall(self, "setName", .{name});
+    }
+
+    pub fn cast(self: ISetName, comptime T: type) @TypeOf(zoop.cast(self, T)) {
+        return zoop.cast(self, T);
+    }
+
+    pub fn as(self: ISetName, comptime T: type) @TypeOf(zoop.as(self, T)) {
+        return zoop.as(self, T);
+    }
+};
+
+pub const IHuman = struct {
+    pub const extends = .{ ISetName, IAge };
     ptr: *anyopaque,
     vptr: *anyopaque,
 
     pub fn getName(self: IHuman) []const u8 {
         return zoop.icall(self, "getName", .{});
-        // return zoop.vptr(self).getName(zoop.cptr(self));
-    }
-
-    pub fn setName(self: IHuman, name: []const u8) void {
-        zoop.icall(self, "setName", .{name});
-        // zoop.vptr(self).setName(zoop.cptr(self), name);
     }
 
     pub fn cast(self: IHuman, comptime T: type) @TypeOf(zoop.cast(self, T)) {
@@ -106,7 +118,7 @@ pub const IHuman = struct {
 };
 
 pub const Human = struct {
-    pub const extends = .{zoop.IFormat};
+    pub const extends = .{ zoop.IFormat, IAge };
     const HumanPtr = *align(zoop.alignment) Human;
     age: u8 align(zoop.alignment) = 99,
     name: []const u8 = "default",
@@ -159,6 +171,7 @@ pub const Sub = struct {
 };
 
 pub const SubSub = struct {
+    pub const extends = .{ IAge, IHuman };
     super: Sub align(zoop.alignment),
 
     pub fn init(self: *align(zoop.alignment) SubSub, name: []const u8) void {
@@ -171,6 +184,7 @@ pub const SubSub = struct {
 };
 
 pub const Custom = struct {
+    pub const extends = .{ zoop.IFormat, ISetName };
     super: SubSub align(zoop.alignment),
     age: u16 = 99,
     pub fn init(self: *Custom, name: []const u8) void {
@@ -198,10 +212,6 @@ fn klassPtr(any: anytype) *zoop.Klass(std.meta.Child(@TypeOf(any))) {
 
 test "zoop" {
     const t = std.testing;
-    // const VT = zoop.Vtable(IHuman);
-    // inline for (std.meta.fields(VT)) |field| {
-    //     std.debug.print("{s} {}\n", .{ field.name, field.type });
-    // }
 
     if (true) {
         // test interface excludes
@@ -229,8 +239,8 @@ test "zoop" {
         try t.expect(zoop.as(&human.class, IHuman) == null);
 
         var sub = zoop.make(Sub, .{ .super = .{ .name = "sub" } });
-        const psub = &sub.class;
-        const phuman: *Human = &sub.class.super;
+        var psub = &sub.class;
+        var phuman: *Human = &sub.class.super;
         const ksub = zoop.Klass(Sub).from(psub);
         const khuman = zoop.Klass(Human).from(phuman);
         try t.expect(@intFromPtr(ksub) == @intFromPtr(khuman));
@@ -243,14 +253,9 @@ test "zoop" {
         try t.expectEqualStrings(ihuman.getName(), "sub");
         ihuman = zoop.cast(&sub, IHuman);
         try t.expectEqualStrings(ihuman.getName(), "sub");
-        ihuman.setName("sub2");
+        zoop.vcall(ihuman, ISetName.setName, .{"sub2"});
         try t.expectEqualStrings(ihuman.getName(), "sub2");
         try t.expectEqualStrings(sub.class.super.getName(), "sub2");
-
-        // test classInfo
-        try t.expect(zoop.classInfo(ihuman) == zoop.classInfo(&sub));
-        try t.expect(zoop.classInfo(ihuman) == zoop.classInfo(&sub.class));
-        try t.expect(zoop.classInfo(&sub) == zoop.classInfo(&sub.class));
 
         // test typeinfo
         try t.expect(zoop.typeInfo(ihuman) != zoop.typeInfo(sub));
@@ -295,6 +300,28 @@ test "zoop" {
         ihuman = zoop.as(zoop.as(&custom, zoop.IObject).?, IHuman).?;
         try t.expectEqualStrings(ihuman.getName(), "custom");
 
+        // test classInfo
+        var psubsub = zoop.cast(&custom, SubSub);
+        psub = zoop.cast(&custom, Sub);
+        phuman = zoop.cast(&custom, Human);
+        try t.expect(zoop.classInfo(ihuman) == zoop.classInfo(psub));
+        try t.expect(zoop.classInfo(psub) == zoop.classInfo(phuman));
+        const hinfo = zoop.classInfo(phuman);
+        const sinfo = zoop.classInfo(psub);
+        const ssinfo = zoop.classInfo(psubsub);
+        const cinfo = zoop.classInfo(&custom);
+        try t.expect(hinfo == cinfo);
+        try t.expect(sinfo == cinfo);
+        try t.expect(ssinfo == cinfo);
+        try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Human, zoop.IFormat));
+        try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Human, IAge));
+        try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Sub, IAge));
+        try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(SubSub, IAge));
+        try t.expect(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(Sub, IHuman));
+        try t.expect(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(SubSub, IHuman));
+        try t.expect(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(Sub, ISetName));
+        try t.expect(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(SubSub, ISetName));
+
         // test interface -> interface
         const iage = ihuman.cast(IAge); //zoop.cast(ihuman, IAge);
         try t.expect(iage.getAge() == 88);
@@ -324,7 +351,7 @@ test "zoop" {
         // try t.expect(zoop.getAllocator(&custom) == null);
 
         // test heap address
-        var psubsub = try zoop.new(t.allocator, SubSub, null);
+        psubsub = try zoop.new(t.allocator, SubSub, null);
         ihuman = zoop.cast(psubsub, IHuman);
         const cpsubsub: *const SubSub = psubsub;
         const cpsub = zoop.cast(cpsubsub, Sub);
