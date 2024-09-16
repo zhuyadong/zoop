@@ -314,9 +314,14 @@ test "zoop" {
         try t.expect(sinfo == cinfo);
         try t.expect(ssinfo == cinfo);
         try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Human, zoop.IFormat));
+        try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Sub, zoop.IFormat));
+        try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(SubSub, zoop.IFormat));
         try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Human, IAge));
         try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Sub, IAge));
         try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(SubSub, IAge));
+        try t.expect(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(Human, zoop.IObject));
+        try t.expect(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(Sub, zoop.IObject));
+        try t.expect(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(SubSub, zoop.IObject));
         try t.expect(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(Sub, IHuman));
         try t.expect(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(SubSub, IHuman));
         try t.expect(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(Sub, ISetName));
