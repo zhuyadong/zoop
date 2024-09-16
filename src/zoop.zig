@@ -81,6 +81,15 @@ pub const IObject = struct {
     }
 };
 
+pub const IRaw = struct {
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+
+    pub fn cast(self: IRaw, comptime I: type) I {
+        return I{ .ptr = self.ptr, .vptr = self.vptr };
+    }
+};
+
 pub const IFormat = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
