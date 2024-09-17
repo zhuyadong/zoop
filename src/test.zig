@@ -147,31 +147,32 @@ pub const IHuman = struct {
 
 pub const Human = struct {
     pub const extends = .{ zoop.IFormat, IAge };
-    const HumanPtr = *align(zoop.alignment) Human;
-    age: u8 align(zoop.alignment) = 99,
+    const Self = *align(zoop.alignment) Human;
+    iface: IHuman align(zoop.alignment) = zoop.nil(IHuman),
+    age: u8 = 99,
     name: []const u8 = "default",
 
-    pub fn init(self: HumanPtr, name: []const u8) void {
+    pub fn init(self: Self, name: []const u8) void {
         self.name = name;
     }
 
-    pub fn deinit(self: HumanPtr) void {
+    pub fn deinit(self: Self) void {
         self.name = "";
     }
 
-    pub fn getName(self: HumanPtr) []const u8 {
+    pub fn getName(self: Self) []const u8 {
         return self.name;
     }
 
-    pub fn setName(self: HumanPtr, name: []const u8) void {
+    pub fn setName(self: Self, name: []const u8) void {
         self.name = name;
     }
 
-    pub fn getAge(self: HumanPtr) u8 {
+    pub fn getAge(self: Self) u8 {
         return self.age;
     }
 
-    pub fn formatAny(self: HumanPtr, writer: std.io.AnyWriter) anyerror!void {
+    pub fn formatAny(self: Self, writer: std.io.AnyWriter) anyerror!void {
         const classinfo = zoop.classInfo(self);
         try writer.print("{s}{{.age = {}, .name='{s}'}}\n", .{ classinfo.typeinfo.typename, self.age, self.name });
         const ilist = &.{ 1, 2, 3, 4 };
@@ -242,7 +243,8 @@ fn klassPtr(any: anytype) *zoop.Klass(std.meta.Child(@TypeOf(any))) {
 
 test "zoop" {
     const t = std.testing;
-
+    std.debug.print("{}\n", .{zoop.isMethod(Human, "getAge")});
+    std.debug.print("{}\n", .{@typeInfo(Human).Struct.fields[0].type});
     if (true) {
         // test interface excludes
         const Itest = struct {

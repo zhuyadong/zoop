@@ -701,7 +701,7 @@ fn isMethod(comptime T: type, comptime name: []const u8) bool {
         switch (@typeInfo(FT)) {
             else => {},
             .Fn => |f| {
-                if (f.params.len > 1) {
+                if (f.params.len > 0) {
                     return RealType(f.params[0].type.?) == T;
                 }
             },
@@ -725,7 +725,7 @@ fn MethodType(comptime T: type, comptime name: []const u8) type {
 
             const fields = @typeInfo(Cur).Struct.fields;
             if (fields.len > 0 and isClassType(RealType(fields[0].type))) {
-                Cur = RealType(fields[0].type);
+                Cur = fields[0].type;
             } else {
                 Cur = void;
             }
