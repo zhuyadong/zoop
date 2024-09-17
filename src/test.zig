@@ -243,8 +243,6 @@ fn klassPtr(any: anytype) *zoop.Klass(std.meta.Child(@TypeOf(any))) {
 
 test "zoop" {
     const t = std.testing;
-    std.debug.print("{}\n", .{zoop.isMethod(Human, "getAge")});
-    std.debug.print("{}\n", .{@typeInfo(Human).Struct.fields[0].type});
     if (true) {
         // test interface excludes
         const Itest = struct {

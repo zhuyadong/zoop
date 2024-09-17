@@ -262,7 +262,9 @@ pub fn Klass(comptime T: type) type {
 pub fn ApiEnum(comptime I: type) type {
     if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
 
-    var apis = tupleInit(.{});
+    const decls = std.meta.declarations(I);
+    var apis: [decls.len]std.builtin.Type.Declaration = undefined;
+    var idx = 0;
     inline for (std.meta.declarations(I)) |decl| {
         const info = @typeInfo(@TypeOf(@field(I, decl.name)));
         if (info == .Fn and info.Fn.params.len > 0 and !info.Fn.is_generic) {
@@ -273,12 +275,15 @@ pub fn ApiEnum(comptime I: type) type {
                 .Pointer => std.meta.Child(first),
             };
             if (Self == I) {
-                apis = tupleAppendUnique(apis, decl.name);
+                if (!hasDecl(apis[0..idx], decl)) {
+                    apis[idx] = decl;
+                    idx += 1;
+                }
             }
         }
     }
 
-    if (apis.items.len == 0) {
+    if (idx == 0) {
         return @Type(.{
             .Enum = .{
                 .tag_type = u0,
@@ -289,10 +294,10 @@ pub fn ApiEnum(comptime I: type) type {
         });
     }
 
-    var fields: [apis.items.len]std.builtin.Type.EnumField = undefined;
-    inline for (apis.items, 0..) |name, i| {
+    var fields: [idx]std.builtin.Type.EnumField = undefined;
+    inline for (0..idx) |i| {
         fields[i] = .{
-            .name = name ++ "",
+            .name = apis[i].name,
             .value = i,
         };
     }
@@ -310,7 +315,15 @@ pub fn MethodEnum(comptime T: type) type {
     const Class = if (isKlassType(T)) T.Class else if (isClassType(T) or isInterfaceType(T)) T else @compileError(compfmt("{s} is not klass/class/interface.", .{@typeName(T)}));
 
     const supers = if (isInterfaceType(T)) interfaces(T) else classes(Class);
-    var methods = tupleInit(.{});
+    const count = blk: {
+        var n = 0;
+        for (supers.items) |super| {
+            n += std.meta.declarations(super).len;
+        }
+        break :blk n;
+    };
+    var methods: [count]std.builtin.Type.Declaration = undefined;
+    var idx = 0;
     inline for (supers.items) |super| {
         inline for (std.meta.declarations(super)) |decl| {
             const info = @typeInfo(@TypeOf(@field(super, decl.name)));
@@ -321,14 +334,15 @@ pub fn MethodEnum(comptime T: type) type {
                     .Struct => first,
                     .Pointer => std.meta.Child(first),
                 };
-                if (Self == super) {
-                    methods = tupleAppendUnique(methods, decl.name);
+                if (Self == super and !hasDecl(methods[0..idx], decl)) {
+                    methods[idx] = decl;
+                    idx += 1;
                 }
             }
         }
     }
 
-    if (methods.items.len == 0) {
+    if (idx == 0) {
         return @Type(.{
             .Enum = .{
                 .tag_type = u0,
@@ -339,10 +353,10 @@ pub fn MethodEnum(comptime T: type) type {
         });
     }
 
-    var fields: [methods.items.len]std.builtin.Type.EnumField = undefined;
-    inline for (methods.items, 0..) |name, i| {
+    var fields: [idx]std.builtin.Type.EnumField = undefined;
+    for (0..idx) |i| {
         fields[i] = .{
-            .name = name ++ "",
+            .name = methods[i].name,
             .value = i,
         };
     }
@@ -695,6 +709,13 @@ pub fn format(ptr: anytype, writer: anytype) anyerror!void {
 }
 
 //===== private content ======
+fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.builtin.Type.Declaration) bool {
+    for (decls) |d| {
+        if (std.mem.eql(u8, d.name, decl.name)) return true;
+    }
+    return false;
+}
+
 fn isMethod(comptime T: type, comptime name: []const u8) bool {
     if (@hasDecl(T, name)) {
         const FT = @TypeOf(@field(T, name));
