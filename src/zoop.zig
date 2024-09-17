@@ -156,7 +156,7 @@ pub fn getUpMethod(comptime T: type, comptime name: []const u8) UpMethodType(T, 
         const Class = if (isKlassType(T)) T.Class else T;
         const Super = blk: {
             const fields = @typeInfo(Class).Struct.fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct and isClassType(fields[0].type)) {
                 break :blk fields[0].type;
             } else {
                 break :blk void;
@@ -442,6 +442,7 @@ pub fn tupleAppendUnique(comptime tuple: Tuple, comptime any: anytype) Tuple {
 
 pub inline fn tupleHas(comptime tuple: Tuple, comptime any: anytype) bool {
     comptime {
+        @setEvalBranchQuota(3000);
         for (tuple.items) |item| {
             if (@TypeOf(item) == @TypeOf(any)) {
                 if (@TypeOf(any) == [:0]const u8 or @TypeOf(any) == []const u8) {
@@ -694,19 +695,37 @@ pub fn format(ptr: anytype, writer: anytype) anyerror!void {
 }
 
 //===== private content ======
+fn isMethod(comptime T: type, comptime name: []const u8) bool {
+    if (@hasDecl(T, name)) {
+        const FT = @TypeOf(@field(T, name));
+        switch (@typeInfo(FT)) {
+            else => {},
+            .Fn => |f| {
+                if (f.params.len > 1) {
+                    return RealType(f.params[0].type.?) == T;
+                }
+            },
+        }
+    }
+    return false;
+}
+
+fn RealType(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        else => T,
+        .Pointer => std.meta.Child(T),
+    };
+}
+
 fn MethodType(comptime T: type, comptime name: []const u8) type {
     comptime {
         var Cur = if (isKlassType(T)) T.Class else T;
         while (Cur != void) {
-            if (@hasDecl(Cur, name)) {
-                const FT = @TypeOf(@field(Cur, name));
-                if (@typeInfo(FT) == .Fn) {
-                    return FT;
-                }
-            }
+            if (isMethod(Cur, name)) return @TypeOf(@field(Cur, name));
+
             const fields = @typeInfo(Cur).Struct.fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
-                Cur = fields[0].type;
+            if (fields.len > 0 and isClassType(RealType(fields[0].type))) {
+                Cur = RealType(fields[0].type);
             } else {
                 Cur = void;
             }
@@ -720,7 +739,7 @@ fn UpMethodType(comptime T: type, comptime name: []const u8) type {
         const Class = if (isKlassType(T)) T.Class else T;
         const Super = blk: {
             const fields = @typeInfo(Class).Struct.fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct) {
+            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct and isClassType(fields[0].type)) {
                 break :blk fields[0].type;
             } else {
                 break :blk void;
@@ -1012,6 +1031,9 @@ fn makeTypeId(comptime T: type) type_id {
 }
 
 fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
+    if (!isKlassType(T) and !isClassType(T)) @compileError(compfmt("{s} is not klass/class.", .{@typeName(T)}));
+    if (!isInterfaceType(I)) @compileError(compfmt("{s} is not interface.", .{@typeName(I)}));
+
     const VT = Vtable(I);
     const ifaces = interfaces(I);
     const nsuper = ifaces.items.len - 1;
