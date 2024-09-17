@@ -173,9 +173,7 @@ pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
 };
 
 pub fn Klass(comptime T: type) type {
-    comptime {
-        if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.(check if @alignOf({s}) == zoop.alignment)", .{ @typeName(T), @typeName(T) }));
-    }
+    if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.(check if @alignOf({s}) == zoop.alignment)", .{ @typeName(T), @typeName(T) }));
 
     return struct {
         pub const @"#klass" = true;
@@ -320,7 +318,7 @@ pub fn MethodEnum(comptime T: type) type {
     };
     var methods: [count]std.builtin.Type.Declaration = undefined;
     var idx = 0;
-    inline for (supers.items) |super| {
+    for (supers.items) |super| {
         inline for (std.meta.declarations(super)) |decl| {
             const info = @typeInfo(@TypeOf(@field(super, decl.name)));
             if (info == .Fn and info.Fn.params.len > 0 and !info.Fn.is_generic) {
@@ -373,10 +371,10 @@ pub fn Vtable(comptime I: type) type {
     const ifaces = interfaces(I);
     var vtables: [ifaces.items.len]type = undefined;
     // ifaces.items.len - 1 for saving pointer to super interfaces vtable, -1 for I itself,
-    // can make interface to interface casting faster.
+    // for making interface to interface casting faster.
     var nfield: comptime_int = ifaces.items.len - 1;
 
-    inline for (ifaces.items, 0..) |iface, i| {
+    for (ifaces.items, 0..) |iface, i| {
         vtables[i] = VtableDirect(iface);
         nfield += @typeInfo(vtables[i]).Struct.fields.len;
     }
@@ -740,67 +738,59 @@ fn RealType(comptime T: type) type {
 }
 
 fn MethodType(comptime T: type, comptime name: []const u8) type {
-    comptime {
-        var Cur = if (isKlassType(T)) T.Class else T;
-        while (Cur != void) {
-            if (isMethod(Cur, name)) return @TypeOf(@field(Cur, name));
+    var Cur = if (isKlassType(T)) T.Class else T;
+    while (Cur != void) {
+        if (isMethod(Cur, name)) return @TypeOf(@field(Cur, name));
 
-            const fields = @typeInfo(Cur).Struct.fields;
-            if (fields.len > 0 and isClassType(RealType(fields[0].type))) {
-                Cur = fields[0].type;
-            } else {
-                Cur = void;
-            }
+        const fields = @typeInfo(Cur).Struct.fields;
+        if (fields.len > 0 and isClassType(RealType(fields[0].type))) {
+            Cur = fields[0].type;
+        } else {
+            Cur = void;
         }
-        return void;
     }
+    return void;
 }
 
 fn UpMethodType(comptime T: type, comptime name: []const u8) type {
-    comptime {
-        const Class = if (isKlassType(T)) T.Class else T;
-        const Super = blk: {
-            const fields = @typeInfo(Class).Struct.fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct and isClassType(fields[0].type)) {
-                break :blk fields[0].type;
-            } else {
-                break :blk void;
-            }
-        };
-        return if (Super == void) void else MethodType(Super, name);
-    }
+    const Class = if (isKlassType(T)) T.Class else T;
+    const Super = blk: {
+        const fields = @typeInfo(Class).Struct.fields;
+        if (fields.len > 0 and @typeInfo(fields[0].type) == .Struct and isClassType(fields[0].type)) {
+            break :blk fields[0].type;
+        } else {
+            break :blk void;
+        }
+    };
+    return if (Super == void) void else MethodType(Super, name);
 }
 
 fn ReturnType(comptime I: type, comptime method: ApiEnum(I)) type {
-    comptime {
-        if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
-    }
+    if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
     return @typeInfo(@TypeOf(@field(I, @tagName(method)))).Fn.return_type orelse void;
 }
 
 fn ApiInfo(comptime method: anytype) type {
-    comptime {
-        const info = @typeInfo(@TypeOf(method));
-        if (info != .Fn) @compileError("method is not a .Fn");
-        if (info.Fn.params.len == 0 or !isInterfaceType(info.Fn.params[0].type.?))
-            @compileError(compfmt("{s} is not an interface type.", .{@typeName(info.Fn.params[0].type.?)}));
+    const info = @typeInfo(@TypeOf(method));
+    if (info != .Fn) @compileError("method is not a .Fn");
+    if (info.Fn.params.len == 0 or !isInterfaceType(info.Fn.params[0].type.?))
+        @compileError(compfmt("{s} is not an interface type.", .{@typeName(info.Fn.params[0].type.?)}));
 
-        const I = info.Fn.params[0].type orelse unreachable;
-        const method_name = blk: {
-            for (std.meta.declarations(I)) |decl| {
-                if (@TypeOf(@field(I, decl.name)) == @TypeOf(method)) {
-                    if (@field(I, decl.name) == method)
-                        break :blk decl.name;
-                }
+    const I = info.Fn.params[0].type orelse unreachable;
+    const method_name = blk: {
+        for (std.meta.declarations(I)) |decl| {
+            if (@TypeOf(@field(I, decl.name)) == @TypeOf(method)) {
+                if (@field(I, decl.name) == method)
+                    break :blk decl.name;
             }
-            unreachable;
-        };
-        return struct {
-            pub const Iface = I;
-            pub const Return = @typeInfo(@TypeOf(method)).Fn.return_type orelse void;
-            pub const name = nameCast(ApiEnum(I), method_name);
-        };
-    }
+        }
+        unreachable;
+    };
+    return struct {
+        pub const Iface = I;
+        pub const Return = @typeInfo(@TypeOf(method)).Fn.return_type orelse void;
+        pub const name = nameCast(ApiEnum(I), method_name);
+    };
 }
 
 fn Caster(comptime V: type, comptime T: type) type {
@@ -977,21 +967,17 @@ fn initClass(pclass: anytype) void {
 }
 
 fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
-    return (struct {
-        pub const val: usize = blk: {
-            const supers = classes(T);
-            for (supers.items) |V| {
-                if (@hasField(V, name)) {
-                    if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
-                        const pv: *allowzero V = @ptrFromInt(0);
-                        const pf = &@field(pv, name);
-                        break :blk @intFromPtr(pf);
-                    }
-                }
+    const supers = classes(T);
+    inline for (supers.items) |V| {
+        if (@hasField(V, name)) {
+            if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
+                const pv: *allowzero V = @ptrFromInt(0);
+                const pf = &@field(pv, name);
+                return @intFromPtr(pf);
             }
-            @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
-        };
-    }).val;
+        }
+    }
+    @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
 }
 
 fn classChecker(comptime T: type) *const ClassCheckFunc {
@@ -1100,46 +1086,33 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
 }
 
 pub inline fn isInterfaceType(comptime T: type) bool {
-    return (struct {
-        pub const val = blk: {
-            const fields = @typeInfo(IObject).Struct.fields;
-            break :blk switch (@typeInfo(T)) {
-                else => false,
-                .Struct => |s| s.fields.len == fields.len and
-                    s.fields[0].type == fields[0].type and
-                    s.fields[1].type == fields[1].type and
-                    std.mem.eql(u8, s.fields[0].name, fields[0].name) and
-                    std.mem.eql(u8, s.fields[1].name, fields[1].name),
-            };
-        };
-    }).val;
+    const fields = @typeInfo(IObject).Struct.fields;
+    return comptime switch (@typeInfo(T)) {
+        else => false,
+        .Struct => |s| s.fields.len == fields.len and
+            s.fields[0].type == fields[0].type and
+            s.fields[1].type == fields[1].type and
+            std.mem.eql(u8, s.fields[0].name, fields[0].name) and
+            std.mem.eql(u8, s.fields[1].name, fields[1].name),
+    };
 }
 
 inline fn isClassType(comptime T: type) bool {
-    return (struct {
-        pub const val = blk: {
-            if (isKlassType(T)) break :blk false;
-            if (isInterfaceType(T)) break :blk false;
-            break :blk switch (@typeInfo(T)) {
-                else => false,
-                .Struct => |s| !s.is_tuple and s.fields.len > 0 and s.fields[0].alignment == alignment,
-            };
-        };
-    }).val;
+    if (isKlassType(T)) return false;
+    if (isInterfaceType(T)) return false;
+    return switch (@typeInfo(T)) {
+        else => false,
+        .Struct => |s| !s.is_tuple and s.fields.len > 0 and s.fields[0].alignment == alignment,
+    };
 }
 
 inline fn isKlassType(comptime T: type) bool {
-    return (struct {
-        pub const val = blk: {
-            if (@typeInfo(T) == .Struct) {
-                break :blk @hasDecl(T, "#klass");
-            }
-            break :blk false;
-        };
-    }).val;
+    if (@typeInfo(T) == .Struct) {
+        return @hasDecl(T, "#klass");
+    } else return false;
 }
 
-inline fn isTuple(any: anytype) bool {
+fn isTuple(any: anytype) bool {
     if (@TypeOf(any) == type and @typeInfo(any) == .Struct) {
         if (!@hasDecl(any, "items")) return false;
         const T = @TypeOf(@field(any, "items"));
@@ -1153,86 +1126,74 @@ inline fn isTuple(any: anytype) bool {
 }
 
 fn interfaceIndex(comptime T: type, comptime I: type) usize {
-    return (struct {
-        pub const index = blk: {
-            const ifaces = interfaces(T);
-            for (ifaces.items, 0..) |iface, i| {
-                if (iface == I) break :blk i;
-            }
-            @compileError(compfmt("{s} don't support interface:{s}", .{ @typeName(T), @typeName(I) }));
-        };
-    }).index;
+    const ifaces = interfaces(T);
+    inline for (ifaces.items, 0..) |iface, i| {
+        if (iface == I) return i;
+    }
+    @compileError(compfmt("{s} don't support interface:{s}", .{ @typeName(T), @typeName(I) }));
 }
 
 fn interfaces(comptime T: type) Tuple {
-    return (struct {
-        pub const val = blk: {
-            var ret = tupleInit(IObject);
+    var ret = tupleInit(IObject);
 
-            if (isInterfaceType(T)) {
-                if (@hasDecl(T, "extends")) {
-                    const extends = @field(T, "extends");
-                    switch (@typeInfo(@TypeOf(extends))) {
-                        else => {},
-                        .Struct => |s| {
-                            if (s.is_tuple) {
-                                for (extends) |iface| {
-                                    if (isInterfaceType(iface)) {
-                                        ret = tupleAppendUnique(ret, interfaces(iface));
-                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
-                                }
-                            }
-                        },
+    if (isInterfaceType(T)) {
+        if (@hasDecl(T, "extends")) {
+            const extends = @field(T, "extends");
+            switch (@typeInfo(@TypeOf(extends))) {
+                else => {},
+                .Struct => |s| {
+                    if (s.is_tuple) {
+                        for (extends) |iface| {
+                            if (isInterfaceType(iface)) {
+                                ret = tupleAppendUnique(ret, interfaces(iface));
+                            } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                        }
                     }
-                }
-                ret = tupleAppendUnique(ret, T);
-            } else if (isClassType(T)) {
-                const fields = std.meta.fields(T);
-                if (fields.len > 0 and isClassType(fields[0].type)) {
-                    ret = tupleAppendUnique(ret, interfaces(fields[0].type));
-                }
-                if (@hasDecl(T, "extends")) {
-                    const extends = @field(T, "extends");
-                    switch (@typeInfo(@TypeOf(extends))) {
-                        else => {},
-                        .Struct => |s| {
-                            if (s.is_tuple) {
-                                for (extends) |iface| {
-                                    if (isInterfaceType(iface)) {
-                                        ret = tupleAppendUnique(ret, interfaces(iface));
-                                    } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
-                                }
-                            }
-                        },
-                    }
-                }
+                },
             }
+        }
+        ret = tupleAppendUnique(ret, T);
+    } else if (isClassType(T)) {
+        const fields = std.meta.fields(T);
+        if (fields.len > 0 and isClassType(fields[0].type)) {
+            ret = tupleAppendUnique(ret, interfaces(fields[0].type));
+        }
+        if (@hasDecl(T, "extends")) {
+            const extends = @field(T, "extends");
+            switch (@typeInfo(@TypeOf(extends))) {
+                else => {},
+                .Struct => |s| {
+                    if (s.is_tuple) {
+                        for (extends) |iface| {
+                            if (isInterfaceType(iface)) {
+                                ret = tupleAppendUnique(ret, interfaces(iface));
+                            } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                        }
+                    }
+                },
+            }
+        }
+    }
 
-            break :blk ret;
-        };
-    }).val;
+    return ret;
 }
 
 fn classes(comptime T: type) Tuple {
-    return (struct {
-        pub const val = blk: {
-            var ret = tupleInit(.{});
-            if (!isClassType(T)) break :blk ret;
+    var ret = tupleInit(.{});
+    if (!isClassType(T)) return ret;
 
-            var Cur = T;
-            while (Cur != void) {
-                ret = tupleAppend(ret, Cur);
-                const fields = std.meta.fields(Cur);
-                if (fields.len > 0 and isClassType(fields[0].type)) {
-                    Cur = fields[0].type;
-                } else {
-                    Cur = void;
-                }
-            }
+    var Cur = T;
+    while (Cur != void) {
+        ret = tupleAppend(ret, Cur);
+        const fields = std.meta.fields(Cur);
+        if (fields.len > 0 and isClassType(fields[0].type)) {
+            Cur = fields[0].type;
+        } else {
+            Cur = void;
+        }
+    }
 
-            break :blk ret;
-        };
-    }).val;
+    return ret;
 }
 
 inline fn isExclude(comptime I: type, comptime method: []const u8) bool {
@@ -1315,7 +1276,7 @@ fn StackBuf(comptime N: usize) type {
 }
 
 fn pointerType(any: anytype) enum {
-    no,
+    none,
     read,
     write,
 } {
@@ -1323,21 +1284,12 @@ fn pointerType(any: anytype) enum {
         else => @TypeOf(any),
         .Type => any,
     };
-    return (struct {
-        pub const val = blk: {
-            // const info = if (T == type) @typeInfo(any) else @typeInfo(T);
-            break :blk switch (@typeInfo(T)) {
-                else => .no,
-                .Pointer => |p| if (p.is_const) .read else .write,
-            };
-        };
-    }).val;
+    return switch (@typeInfo(T)) {
+        else => .none,
+        .Pointer => |p| if (p.is_const) .read else .write,
+    };
 }
 
-inline fn canCast(comptime V: type, comptime T: type) bool {
-    return (struct {
-        pub const val = blk: {
-            break :blk Caster(V, T) != void;
-        };
-    }).val;
+fn canCast(comptime V: type, comptime T: type) bool {
+    return Caster(V, T) != void;
 }
