@@ -259,23 +259,120 @@ pub fn Klass(comptime T: type) type {
     };
 }
 
+pub fn ApiEnum(comptime I: type) type {
+    if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
+
+    var apis = tupleInit(.{});
+    inline for (std.meta.declarations(I)) |decl| {
+        const info = @typeInfo(@TypeOf(@field(I, decl.name)));
+        if (info == .Fn and info.Fn.params.len > 0 and !info.Fn.is_generic) {
+            const first = info.Fn.params[0].type.?;
+            const Self = switch (@typeInfo(first)) {
+                else => void,
+                .Struct => first,
+                .Pointer => std.meta.Child(first),
+            };
+            if (Self == I) {
+                apis = tupleAppendUnique(apis, decl.name);
+            }
+        }
+    }
+
+    if (apis.items.len == 0) {
+        return @Type(.{
+            .Enum = .{
+                .tag_type = u0,
+                .fields = &.{},
+                .decls = &.{},
+                .is_exhaustive = true,
+            },
+        });
+    }
+
+    var fields: [apis.items.len]std.builtin.Type.EnumField = undefined;
+    inline for (apis.items, 0..) |name, i| {
+        fields[i] = .{
+            .name = name ++ "",
+            .value = i,
+        };
+    }
+    return @Type(.{
+        .Enum = .{
+            .tag_type = std.math.IntFittingRange(0, fields.len - 1),
+            .fields = &fields,
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+}
+
+pub fn MethodEnum(comptime T: type) type {
+    const Class = if (isKlassType(T)) T.Class else if (isClassType(T) or isInterfaceType(T)) T else @compileError(compfmt("{s} is not klass/class/interface.", .{@typeName(T)}));
+
+    const supers = if (isInterfaceType(T)) interfaces(T) else classes(Class);
+    var methods = tupleInit(.{});
+    inline for (supers.items) |super| {
+        inline for (std.meta.declarations(super)) |decl| {
+            const info = @typeInfo(@TypeOf(@field(super, decl.name)));
+            if (info == .Fn and info.Fn.params.len > 0 and !info.Fn.is_generic) {
+                const first = info.Fn.params[0].type.?;
+                const Self = switch (@typeInfo(first)) {
+                    else => void,
+                    .Struct => first,
+                    .Pointer => std.meta.Child(first),
+                };
+                if (Self == super) {
+                    methods = tupleAppendUnique(methods, decl.name);
+                }
+            }
+        }
+    }
+
+    if (methods.items.len == 0) {
+        return @Type(.{
+            .Enum = .{
+                .tag_type = u0,
+                .fields = &.{},
+                .decls = &.{},
+                .is_exhaustive = true,
+            },
+        });
+    }
+
+    var fields: [methods.items.len]std.builtin.Type.EnumField = undefined;
+    inline for (methods.items, 0..) |name, i| {
+        fields[i] = .{
+            .name = name ++ "",
+            .value = i,
+        };
+    }
+    return @Type(.{
+        .Enum = .{
+            .tag_type = std.math.IntFittingRange(0, fields.len - 1),
+            .fields = &fields,
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+}
+
 pub fn Vtable(comptime I: type) type {
     comptime {
         if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
     }
     const ifaces = interfaces(I);
-    comptime var vtables: [ifaces.items.len]type = undefined;
+    var vtables: [ifaces.items.len]type = undefined;
     // ifaces.items.len - 1 for saving pointer to super interfaces vtable, -1 for I itself,
     // can make interface to interface casting faster.
-    comptime var nfield: comptime_int = ifaces.items.len - 1;
+    var nfield: comptime_int = ifaces.items.len - 1;
 
     inline for (ifaces.items, 0..) |iface, i| {
         vtables[i] = VtableDirect(iface);
         nfield += @typeInfo(vtables[i]).Struct.fields.len;
     }
 
-    comptime var allfields: [nfield]StructField = undefined;
-    comptime var idx: comptime_int = 0;
+    var allfields: [nfield]StructField = undefined;
+    var idx: comptime_int = 0;
     for (ifaces.items) |iface| {
         if (iface != I) {
             allfields[idx] = StructField{
@@ -343,10 +440,14 @@ pub fn tupleAppendUnique(comptime tuple: Tuple, comptime any: anytype) Tuple {
     }
 }
 
-pub inline fn tupleHas(comptime tuple: Tuple, comptime any: type) bool {
+pub inline fn tupleHas(comptime tuple: Tuple, comptime any: anytype) bool {
     comptime {
         for (tuple.items) |item| {
-            if (item == any) return true;
+            if (@TypeOf(item) == @TypeOf(any)) {
+                if (@TypeOf(any) == [:0]const u8 or @TypeOf(any) == []const u8) {
+                    if (std.mem.eql(u8, item, any)) return true;
+                } else if (item == any) return true;
+            }
         }
         return false;
     }
@@ -411,20 +512,20 @@ pub fn make(comptime T: type, init: ?T) Klass(T) {
 }
 
 /// call interface method
-/// example: zoop.icall(ihuman, "getAge", .{})
-pub fn icall(iface: anytype, comptime method: []const u8, args: anytype) ReturnType(@TypeOf(iface), method) {
+/// example: zoop.icall(ihuman, .getAge, .{})
+pub fn icall(iface: anytype, comptime api_enum: ApiEnum(@TypeOf(iface)), args: anytype) ReturnType(@TypeOf(iface), api_enum) {
     comptime {
         if (!isInterfaceType(@TypeOf(iface))) @compileError(compfmt("'{s}' is not an interface type.", .{@typeName(@TypeOf(iface))}));
     }
     const vptr: *const Vtable(@TypeOf(iface)) = @ptrCast(@alignCast(iface.vptr));
     const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(iface.ptr));
     const ptr: *anyopaque = @ptrFromInt(@intFromPtr(pklass) + pklass.header.info.offset);
-    return @call(.auto, @field(vptr, method), .{ptr} ++ args);
+    return @call(.auto, @field(vptr, @tagName(api_enum)), .{ptr} ++ args);
 }
 
 /// call interface method of klass/class. (virtual call)
 /// example: zoop.vcall(pclass, IHuman.getName, .{})
-pub fn vcall(any: anytype, comptime method: anytype, args: anytype) MethodInfo(method).Return {
+pub fn vcall(any: anytype, comptime method: anytype, args: anytype) ApiInfo(method).Return {
     comptime {
         var pass = false;
         switch (@typeInfo(@TypeOf(any))) {
@@ -436,30 +537,30 @@ pub fn vcall(any: anytype, comptime method: anytype, args: anytype) MethodInfo(m
         }
         if (!pass) @compileError("vcall(any) where any must be *class/*klass/interface");
     }
-    const info = MethodInfo(method);
+    const info = ApiInfo(method);
     if (canCast(@TypeOf(any), info.Iface)) {
         return icall(zoop.cast(any, info.Iface), info.name, args);
     }
     if (zoop.as(any, info.Iface)) |iface| {
         return icall(iface, info.name, args);
     }
-    @panic(StackBuf(2048).init().print("{s} don't support method: {s}.{s}", .{ @typeName(@TypeOf(any)), @typeName(info.Iface), info.name }));
+    @panic(StackBuf(2048).init().print("{s} don't support method: {s}.{s}", .{ @typeName(@TypeOf(any)), @typeName(info.Iface), @tagName(info.name) }));
 }
 
 /// call super class's method.
 /// example: zoop.upcall(pclass, "methodOfSuperClass", .{});
-pub fn upcall(any: anytype, comptime name: []const u8, args: anytype) t: {
+pub fn upcall(any: anytype, comptime method_enum: MethodEnum(std.meta.Child(@TypeOf(any))), args: anytype) t: {
     const T = @TypeOf(any);
     switch (@typeInfo(T)) {
         else => {},
         .Pointer => |p| {
             if (isKlassType(p.child) or isClassType(p.child)) {
                 const Class = if (isKlassType(p.child)) p.child.Class else p.child;
-                const MT = UpMethodType(Class, name);
+                const MT = UpMethodType(Class, @tagName(method_enum));
                 if (MT != void) {
                     break :t @typeInfo(MT).Fn.return_type orelse void;
                 } else {
-                    @compileError(compfmt("no method named '{s}' founded in inherit tree of {s}.", .{ name, @typeName(Class) }));
+                    @compileError(compfmt("no method named '{s}' founded in inherit tree of {s}.", .{ @tagName(method_enum), @typeName(Class) }));
                 }
             }
         },
@@ -468,7 +569,7 @@ pub fn upcall(any: anytype, comptime name: []const u8, args: anytype) t: {
 } {
     const T = comptime std.meta.Child(@TypeOf(any));
     const Class = comptime if (isKlassType(T)) T.Class else T;
-    const method = comptime getUpMethod(Class, name);
+    const method = comptime getUpMethod(Class, @tagName(method_enum));
     const Ptr = comptime @typeInfo(@TypeOf(method)).Fn.params[0].type.?;
     const ptr: Ptr = @ptrCast(if (isKlassType(T)) &any.class else any);
     return @call(.auto, method, .{ptr} ++ args);
@@ -613,14 +714,14 @@ fn UpMethodType(comptime T: type, comptime name: []const u8) type {
     }
 }
 
-fn ReturnType(comptime I: type, comptime method: []const u8) type {
+fn ReturnType(comptime I: type, comptime method: ApiEnum(I)) type {
     comptime {
         if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
     }
-    return @typeInfo(@TypeOf(@field(I, method))).Fn.return_type orelse void;
+    return @typeInfo(@TypeOf(@field(I, @tagName(method)))).Fn.return_type orelse void;
 }
 
-fn MethodInfo(comptime method: anytype) type {
+fn ApiInfo(comptime method: anytype) type {
     comptime {
         const info = @typeInfo(@TypeOf(method));
         if (info != .Fn) @compileError("method is not a .Fn");
@@ -640,7 +741,7 @@ fn MethodInfo(comptime method: anytype) type {
         return struct {
             pub const Iface = I;
             pub const Return = @typeInfo(@TypeOf(method)).Fn.return_type orelse void;
-            pub const name = method_name;
+            pub const name = nameCast(ApiEnum(I), method_name);
         };
     }
 }
@@ -765,7 +866,7 @@ fn formatFunc(comptime T: type) *const FormatFunc {
         pub fn func(piface: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
             const self: *T = @ptrCast(@alignCast(piface));
             if (zoop.as(self.*, IFormat)) |iformat| {
-                try icall(iformat, "formatAny", .{writer});
+                try icall(iformat, .formatAny, .{writer});
             } else {
                 try writer.print("{any}", .{self.*});
             }
@@ -774,7 +875,7 @@ fn formatFunc(comptime T: type) *const FormatFunc {
         pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
             const self: *T = @ptrCast(@alignCast(pself));
             if (zoop.as(self, IFormat)) |iformat| {
-                try icall(iformat, "formatAny", .{writer});
+                try icall(iformat, .formatAny, .{writer});
             } else {
                 try writer.print("{any}", .{self});
             }
@@ -789,8 +890,8 @@ fn formatFunc(comptime T: type) *const FormatFunc {
 
 fn defaultFields(comptime T: type) []StructField {
     const allfields = std.meta.fields(T);
-    comptime var fields: [allfields.len]StructField = undefined;
-    comptime var idx = 0;
+    var fields: [allfields.len]StructField = undefined;
+    var idx = 0;
     inline for (allfields) |field| {
         if (field.default_value != null) {
             fields[idx] = field;
@@ -1088,8 +1189,8 @@ fn VtableDirect(comptime I: type) type {
     if (I == IObject) return struct {};
 
     const decls = std.meta.declarations(I);
-    comptime var fields: [decls.len]StructField = undefined;
-    comptime var idx = 0;
+    var fields: [decls.len]StructField = undefined;
+    var idx = 0;
     for (decls) |decl| {
         if (!isExclude(I, decl.name)) {
             const info = @typeInfo(@TypeOf(@field(I, decl.name)));
@@ -1121,7 +1222,7 @@ fn VtableDirect(comptime I: type) type {
 }
 
 fn VtableFieldType(comptime F: std.builtin.Type.Fn) type {
-    comptime var params: [F.params.len]std.builtin.Type.Fn.Param = undefined;
+    var params: [F.params.len]std.builtin.Type.Fn.Param = undefined;
     params[0] = .{
         .is_generic = F.params[0].is_generic,
         .is_noalias = F.params[0].is_noalias,

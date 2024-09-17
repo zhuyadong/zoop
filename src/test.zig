@@ -7,6 +7,7 @@ var i: ?IHuman = null;
 fn assert(b: bool) void {
     if (!b) @panic("assert failed.");
 }
+
 pub fn main() !void {
     if (false) {
         const s = try zoop.new(allocator, Sub, null);
@@ -96,7 +97,7 @@ pub const IAge = struct {
     vptr: *anyopaque,
 
     pub fn getAge(self: IAge) u8 {
-        return zoop.icall(self, "getAge", .{});
+        return zoop.icall(self, .getAge, .{});
     }
 
     pub fn cast(self: IAge, comptime T: type) @TypeOf(zoop.cast(self, T)) {
@@ -114,7 +115,7 @@ pub const ISetName = struct {
     vptr: *anyopaque,
 
     pub fn setName(self: ISetName, name: []const u8) void {
-        zoop.icall(self, "setName", .{name});
+        zoop.icall(self, .setName, .{name});
     }
 
     pub fn cast(self: ISetName, comptime T: type) @TypeOf(zoop.cast(self, T)) {
@@ -132,7 +133,7 @@ pub const IHuman = struct {
     vptr: *anyopaque,
 
     pub fn getName(self: IHuman) []const u8 {
-        return zoop.icall(self, "getName", .{});
+        return zoop.icall(self, .getName, .{});
     }
 
     pub fn cast(self: IHuman, comptime T: type) @TypeOf(zoop.cast(self, T)) {
@@ -212,19 +213,21 @@ pub const SubSub = struct {
 
 pub const Custom = struct {
     pub const extends = .{ zoop.IFormat, ISetName };
+    const Self = *align(zoop.alignment) @This();
+
     super: SubSub align(zoop.alignment),
     age: u16 = 99,
-    pub fn init(self: *Custom, name: []const u8) void {
+    pub fn init(self: Self, name: []const u8) void {
         self.super.init(name);
     }
 
     // override
-    pub fn getName(_: *Custom) []const u8 {
+    pub fn getName(_: Self) []const u8 {
         return "custom";
     }
 
     // override
-    pub fn getAge(_: *Custom) u8 {
+    pub fn getAge(_: Self) u8 {
         return 88;
     }
 
@@ -364,9 +367,9 @@ test "zoop" {
         try t.expect(zoop.vcall(&custom, IAge.getAge, .{}) == 88);
         try t.expect(zoop.vcall(custom.ptr(), IAge.getAge, .{}) == 88);
         try t.expect(zoop.vcall(ihuman, IAge.getAge, .{}) == 88);
-        try t.expect(zoop.upcall(&custom, "getAge", .{}) == 99);
-        try t.expect(zoop.upcall(custom.ptr(), "getAge", .{}) == 99);
-        try t.expect(zoop.icall(iage, "getAge", .{}) == 88);
+        try t.expect(zoop.upcall(&custom, .getAge, .{}) == 99);
+        try t.expect(zoop.upcall(custom.ptr(), .getAge, .{}) == 99);
+        try t.expect(zoop.icall(iage, .getAge, .{}) == 88);
 
         // test deinit()
         zoop.destroy(&human);
