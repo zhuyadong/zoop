@@ -128,7 +128,7 @@ pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name
         return (struct {
             pub const method = blk: {
                 var Cur = if (isKlassType(T)) T.Class else T;
-                while (Cur != void) {
+                while (Cur != void and isClassType(Cur)) {
                     if (@hasDecl(Cur, name)) {
                         const FT = @TypeOf(@field(Cur, name));
                         if (@typeInfo(FT) == .Fn) {
@@ -473,7 +473,7 @@ pub fn typeId(any: anytype) type_id {
     }
 }
 
-pub fn new(allocator: std.mem.Allocator, comptime T: type, init: ?T) !*T {
+pub fn new(allocator: std.mem.Allocator, comptime T: type, init: ?T) !*align(alignment) T {
     comptime {
         if (!isClassType(T)) @compileError(compfmt("{s} is not a class type.", .{@typeName(T)}));
     }
@@ -627,7 +627,7 @@ pub fn as(any: anytype, comptime T: type) t: {
     break :t if (isInterfaceType(T)) ?T else switch (pointerType(@TypeOf(any))) {
         .read => ?*const T,
         .write => ?*T,
-        else => @compileError(compfmt("zoop.cast(any, T): any must be interface or pointer to class/klass but '{}'.", .{@typeName(@TypeOf(any))})),
+        else => if (isInterfaceType(@TypeOf(any))) ?*T else @compileError(compfmt("zoop.cast(any:{s}, T:{s}): any must be *klass/*class/interface but '{s}'.", .{ @typeName(@TypeOf(any)), @typeName(T), @typeName(@TypeOf(any)) })),
     };
 } {
     const V = @TypeOf(any);
@@ -652,6 +652,22 @@ pub fn as(any: anytype, comptime T: type) t: {
     }
 
     return null;
+}
+
+pub fn asptr(any: anytype) *anyopaque {
+    switch (@typeInfo(@TypeOf(any))) {
+        else => {},
+        .Struct => {
+            if (isInterfaceType(@TypeOf(any))) {
+                return any.ptr;
+            }
+        },
+        .Pointer => |p| {
+            if (isKlassType(p.child)) return @ptrCast(any);
+            if (isClassType(p.child)) return @ptrCast(Klass(p.child).from(any));
+        },
+    }
+    @compileError("zoop.asptr(any) where any must be *klass/*class/interface.");
 }
 
 pub fn nil(comptime I: type) I {
@@ -1040,7 +1056,7 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
     }
 }
 
-inline fn isInterfaceType(comptime T: type) bool {
+pub inline fn isInterfaceType(comptime T: type) bool {
     return (struct {
         pub const val = blk: {
             const fields = @typeInfo(IObject).Struct.fields;
@@ -1266,8 +1282,8 @@ fn pointerType(any: anytype) enum {
     };
     return (struct {
         pub const val = blk: {
-            const info = if (T == type) @typeInfo(any) else @typeInfo(T);
-            break :blk switch (info) {
+            // const info = if (T == type) @typeInfo(any) else @typeInfo(T);
+            break :blk switch (@typeInfo(T)) {
                 else => .no,
                 .Pointer => |p| if (p.is_const) .read else .write,
             };
