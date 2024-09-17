@@ -1112,7 +1112,7 @@ inline fn isKlassType(comptime T: type) bool {
     } else return false;
 }
 
-fn isTuple(any: anytype) bool {
+inline fn isTuple(any: anytype) bool {
     if (@TypeOf(any) == type and @typeInfo(any) == .Struct) {
         if (!@hasDecl(any, "items")) return false;
         const T = @TypeOf(@field(any, "items"));
@@ -1290,6 +1290,6 @@ fn pointerType(any: anytype) enum {
     };
 }
 
-fn canCast(comptime V: type, comptime T: type) bool {
+inline fn canCast(comptime V: type, comptime T: type) bool {
     return Caster(V, T) != void;
 }
