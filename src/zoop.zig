@@ -11,7 +11,7 @@ const zoop = @This();
 
 //===== public content ======
 pub const alignment = @alignOf(KlassHeader);
-pub const type_id = *const anyopaque;
+pub const type_id = u32;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
 pub const TypeInfoGetFunc = fn () *const ClassInfo;
 pub const FormatFunc = fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void;
@@ -75,10 +75,6 @@ pub const Nil = struct {
 pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
-
-    pub fn format(self: *const @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try zoop.format(self, writer);
-    }
 };
 
 pub const IRaw = struct {
@@ -234,11 +230,7 @@ pub fn Klass(comptime T: type) type {
             return &self.class;
         }
 
-        fn getAlly(self: *@This()) ?std.mem.Allocator {
-            return self.allocator;
-        }
-
-        fn deinit(self: *@This()) void {
+        pub fn deinit(self: *@This()) void {
             if (comptime builtin.mode == .Debug) {
                 assert(self.header.magic == KlassHeader.kmagic);
                 assert(self.header.info == makeClassInfo(T));
@@ -255,6 +247,10 @@ pub fn Klass(comptime T: type) type {
             if (self.allocator) |dtor| {
                 dtor.destroy(self);
             }
+        }
+
+        fn getAlly(self: *@This()) ?std.mem.Allocator {
+            return self.allocator;
         }
     };
 }
@@ -477,7 +473,10 @@ pub fn typeInfo(any: anytype) *const TypeInfo {
 }
 
 pub fn classInfo(any: anytype) *const ClassInfo {
-    return ClassInfoGetter(@TypeOf(any)).get(any);
+    return switch (@typeInfo(@TypeOf(any))) {
+        else => ClassInfoGetter(@TypeOf(any)).get(any),
+        .Type => makeClassInfo(any),
+    };
 }
 
 pub fn typeId(any: anytype) type_id {
@@ -532,8 +531,8 @@ pub fn icall(iface: anytype, comptime api_enum: ApiEnum(@TypeOf(iface)), args: a
     comptime {
         if (!isInterfaceType(@TypeOf(iface))) @compileError(compfmt("'{s}' is not an interface type.", .{@typeName(@TypeOf(iface))}));
     }
-    const vptr: *const Vtable(@TypeOf(iface)) = @ptrCast(@alignCast(iface.vptr));
     const pklass: *Klass(struct { x: u8 align(alignment) }) = @ptrFromInt(@intFromPtr(iface.ptr));
+    const vptr: *const Vtable(@TypeOf(iface)) = @ptrFromInt(@intFromPtr(iface.vptr));
     const ptr: *anyopaque = @ptrFromInt(@intFromPtr(pklass) + pklass.header.info.offset);
     return @call(.auto, @field(vptr, @tagName(api_enum)), .{ptr} ++ args);
 }
@@ -551,6 +550,7 @@ pub fn vcall(any: anytype, comptime method: anytype, args: anytype) ApiInfo(meth
             },
         }
         if (!pass) @compileError("vcall(any) where any must be *class/*klass/interface");
+        if (!isInterfaceType(ApiInfo(method).Iface)) @compileError(compfmt("{s} is not an interface.", .{@typeName(ApiInfo(method).Iface)}));
     }
     const info = ApiInfo(method);
     if (canCast(@TypeOf(any), info.Iface)) {
@@ -710,6 +710,7 @@ pub fn format(ptr: anytype, writer: anytype) anyerror!void {
 
 //===== private content ======
 fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.builtin.Type.Declaration) bool {
+    @setEvalBranchQuota(5000);
     for (decls) |d| {
         if (std.mem.eql(u8, d.name, decl.name)) return true;
     }
@@ -914,7 +915,7 @@ fn ClassInfoGetter(comptime T: type) type {
             }
         },
     }
-    @compileError("zoop.classInfo(any) where any must be Class/*class/Klass/*klass/interface");
+    @compileError(compfmt("zoop.classInfo(any) where any must be Class/*class/Klass/*klass/interface, but: {s}", .{@typeName(T)}));
 }
 
 fn formatFunc(comptime T: type) *const FormatFunc {
@@ -1046,9 +1047,7 @@ fn makeTypeInfo(comptime T: type) *const TypeInfo {
 }
 
 fn makeTypeId(comptime T: type) type_id {
-    return @ptrCast(&(struct {
-        pub const val: *T = undefined;
-    }).val);
+    return @intCast(@intFromError(@field(anyerror, "#" ++ @typeName(T))));
 }
 
 fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
@@ -1085,6 +1084,7 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
 
 /// Check whether the type of the function named field in T and the pointer of the function with the same name in VT match
 fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void {
+    @setEvalBranchQuota(5000);
     const VT = Vtable(I);
     const vtinfo = @typeInfo(@typeInfo(FieldType(VT, std.enums.nameCast(FieldEnum(VT), field))).Pointer.child);
     const tinfo = @typeInfo(MethodType(T, field));
