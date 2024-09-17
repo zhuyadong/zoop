@@ -11,7 +11,7 @@ const zoop = @This();
 
 //===== public content ======
 pub const alignment = @alignOf(KlassHeader);
-pub const type_id = u32;
+pub const type_id = [*]const u8;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
 pub const TypeInfoGetFunc = fn () *const ClassInfo;
 pub const FormatFunc = fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void;
@@ -1033,7 +1033,9 @@ fn makeTypeInfo(comptime T: type) *const TypeInfo {
 }
 
 fn makeTypeId(comptime T: type) type_id {
-    return @intCast(@intFromError(@field(anyerror, "#" ++ @typeName(T))));
+    return (struct {
+        pub const name = @typeName(T);
+    }).name.ptr;
 }
 
 fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
