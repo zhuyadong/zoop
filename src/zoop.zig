@@ -14,7 +14,6 @@ pub const alignment = @alignOf(KlassHeader);
 pub const type_id = [*]const u8;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
 pub const TypeInfoGetFunc = fn () *const ClassInfo;
-pub const FormatFunc = fn (*anyopaque, writer: std.io.AnyWriter) anyerror!void;
 pub const ClassPtrFunc = fn (*anyopaque) *anyopaque;
 
 pub const HookFunc = *const fn (obj: IObject) void;
@@ -57,8 +56,6 @@ pub const TypeInfo = struct {
     typename: []const u8,
     /// typeid of the type
     typeid: type_id,
-    /// type to string
-    format: *const FormatFunc,
 };
 
 pub const Nil = struct {
@@ -91,7 +88,7 @@ pub const IFormat = struct {
     vptr: *anyopaque,
 
     pub fn formatAny(self: IFormat, writer: std.io.AnyWriter) anyerror!void {
-        try icall(self, "formatAny", .{writer});
+        try icall(self, .formatAny, .{writer});
     }
 
     pub fn format(self: *const IFormat, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -704,15 +701,6 @@ pub fn isNil(any: anytype) bool {
     return any.ptr == Nil.ptr();
 }
 
-pub fn format(ptr: anytype, writer: anytype) anyerror!void {
-    comptime {
-        if (@typeInfo(@TypeOf(ptr)) != .Pointer) @compileError(compfmt("'{s}' is not pointer.", .{@typeName(@TypeOf(ptr))}));
-    }
-    const T = std.meta.Child(@TypeOf(ptr));
-    const typeinfo = typeInfo(T);
-    try typeinfo.format(@ptrCast(@constCast(ptr)), if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any());
-}
-
 //===== private content ======
 fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.builtin.Type.Declaration) bool {
     @setEvalBranchQuota(5000);
@@ -915,33 +903,6 @@ fn ClassInfoGetter(comptime T: type) type {
     @compileError(compfmt("'{s}' is not Class/*Class/Klass/*Klass/Interface.", .{@typeName(T)}));
 }
 
-fn formatFunc(comptime T: type) *const FormatFunc {
-    if (isInterfaceType(T)) return (struct {
-        pub fn func(piface: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
-            const self: *T = @ptrCast(@alignCast(piface));
-            if (zoop.as(self.*, IFormat)) |iformat| {
-                try icall(iformat, .formatAny, .{writer});
-            } else {
-                try writer.print("{any}", .{self.*});
-            }
-        }
-    }).func else if (isClassType(T) or isKlassType(T)) return (struct {
-        pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
-            const self: *T = @ptrCast(@alignCast(pself));
-            if (zoop.as(self, IFormat)) |iformat| {
-                try icall(iformat, .formatAny, .{writer});
-            } else {
-                try writer.print("{any}", .{self});
-            }
-        }
-    }).func else return (struct {
-        pub fn func(pself: *anyopaque, writer: std.io.AnyWriter) anyerror!void {
-            const self: *T = @ptrCast(@alignCast(pself));
-            try writer.print("{any}", .{self});
-        }
-    }).func;
-}
-
 fn defaultFields(comptime T: type) []StructField {
     const allfields = std.meta.fields(T);
     var fields: [allfields.len]StructField = undefined;
@@ -1041,7 +1002,6 @@ fn makeTypeInfo(comptime T: type) *const TypeInfo {
         pub const info: TypeInfo = .{
             .typename = @typeName(T),
             .typeid = makeTypeId(T),
-            .format = formatFunc(T),
         };
     }).info;
 }
