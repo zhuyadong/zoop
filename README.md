@@ -41,14 +41,16 @@ const t = std.testing;
 var phuman = zoop.new(t.allocator, Human, null);
 // If the class field has a default value, the object field will be initialized to the default value
 try t.expect(phuman.age == 30);
-// Destroy the object and release the memory. If the class defines `deinit`, it will be called first and then release the memory.
+// Destroy the object and release the memory.
+// If the class defines `deinit`, it will be called first and then release the memory.
 zoop.destroy(phuman);
 
 // Create a `Human` on the stack
 var human = zoop.make(Human, null);
 // Access object fields through `ptr()`
 try t.expect(human.ptr().age == 30);
-// Clean up the object (call `deinit` if any). If there is no work to clean up, you don't need to call `zoop.destroy`
+// Clean up the object (call `deinit` if any).
+// If there is no work to clean up, you don't need to call `zoop.destroy`
 zoop.destroy(human.ptr());
 
 // Both `zoop.new` and `zoop.make` support creation-time initialization
@@ -59,7 +61,8 @@ try t.expect(human.ptr().age == 2);
 ```
 ## Inheritance
 ```zig
-// Define `SuperMan`, inherit from `Human`, the parent class must be the first field and the alignment is `zoop.alignment`,
+// Define `SuperMan`, inherit from `Human`, 
+// the parent class must be the first field and the alignment is `zoop.alignment`,
 // The field name is arbitrary and does not have to be `super`, but it is recommended to use `super`
 pub const SuperMan = struct {
     super: Human align(zoop.alignment),
@@ -111,7 +114,8 @@ t.expect(zoop.as(phuman, SuperMan) == null);
 ```zig
 // Define an interface `IName` for accessing names
 pub const IName = struct {
-    // The interface can only define two fields, `ptr` and `vptr`, and the names and types must be the same as below
+    // The interface can only define two fields, `ptr` and `vptr`,
+    // and the names and types must be the same as below
     ptr: *anyopaque,
     vptr: *anyopaque,
 
@@ -174,12 +178,14 @@ var iname = zoop.cast(phuman, IName);
 var iage = zoop.cast(psuper, IAge);
 try t.expect(iage.getAge() == psuper.age);
 try t.expectEqualStrings(iname.getName(), phuman.name);
-// Human does not implement IAge, so the conversion will fail. (Note that now `iname` points to `phuman`, and `iage` points to `psuper`)
+// Human does not implement IAge, so the conversion will fail.
+// (Note that now `iname` points to `phuman`, and `iage` points to `psuper`)
 try t.expect(zoop.as(phuman, IAge) == null);
 try t.expect(zoop.as(iname, IAge) == null);
 // Now let iname point to psuper
 iname = zoop.cast(psuper, IName);
-// Or you can write it like this, but the performance is a little affected (`cast` is O(1), while `as` is O(n) in the worst case n=the number of interfaces implemented by SuperMan)
+// Or you can write it like this, but the performance is a little affected
+// (`cast` is O(1), while `as` is O(n) in the worst case n=the number of interfaces implemented by SuperMan)
 iname = zoop.as(psuper, IName).?;
 // Now iname can be converted to IAge
 try t.expect(zoop.as(iname, IAge) != null);
