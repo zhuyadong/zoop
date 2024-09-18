@@ -159,14 +159,20 @@ pub const INameAndAge struct {
     vptr: *anyopaque,
 }
 
-// can specify exclude APIs
+// can specify exclude APIs.
+// Only methods defined in this interface can be specified,
+// and inherited methods will not be affected.
 pub const INameAndAge struct {
     pub const extends = .{IName, IAge};
-    // exclude "setName" API
-    pub const excludes = .{"setName"};
+    // exclude “ignoreMe" method
+    pub const excludes = .{"ignoreMe"};
 
     ptr: *anyopaque,
     vptr: *anyopaque,
+
+    pub fn ignoreMe(self: INameAndAge) void {
+        zoop.icall(self, .ignoreMe, .{});
+    }
 }
 ```
 

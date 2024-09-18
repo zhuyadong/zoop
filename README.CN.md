@@ -153,16 +153,20 @@ pub const INameAndAge struct {
     vptr: *anyopaque,
 }
 
-// 可以指定接口中哪些方法不包含到接口 API 中
+// 可以指定接口中哪些方法不包含到接口 API 中。
+// 只能指定本接口内定义的方法，不会影响继承来的方法
 pub const INameAndAge struct {
     pub const extends = .{IName, IAge};
-    // 不要包含 “setName" 方法
-    pub const excludes = .{"setName"};
+    // 不要包含 “ignoreMe" 方法
+    pub const excludes = .{"ignoreMe"};
 
     ptr: *anyopaque,
     vptr: *anyopaque,
-}
 
+    pub fn ignoreMe(self: INameAndAge) void {
+        zoop.icall(self, .ignoreMe, .{});
+    }
+}
 ```
 
 ## 实现接口
