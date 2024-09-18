@@ -147,6 +147,14 @@ pub const IAge = struct {
         zoop.ical(self, .setAge, .{age});
     }
 }
+
+// Interfaces can also be inherited
+pub const INameAndAge struct {
+    pub const extends = .{IName, IAge};
+
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+}
 ```
 
 ## Implementing the interface

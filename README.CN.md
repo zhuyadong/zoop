@@ -141,6 +141,14 @@ pub const IAge = struct {
         zoop.icall(self, .setAge, .{age});
     }
 }
+
+// 接口也可以继承
+pub const INameAndAge struct {
+    pub const extends = .{IName, IAge};
+
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+}
 ```
 
 ## 实现接口
