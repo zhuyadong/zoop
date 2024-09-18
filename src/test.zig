@@ -147,7 +147,7 @@ pub const IHuman = struct {
 
 pub const Human = struct {
     pub const extends = .{ zoop.IFormat, IAge };
-    const Self = *align(zoop.alignment) Human;
+    const Self = *Human;
     iface: IHuman align(zoop.alignment) = zoop.nil(IHuman),
     age: u8 = 99,
     name: []const u8 = "default",
@@ -186,7 +186,7 @@ pub const Sub = struct {
     super: Human align(zoop.alignment),
     age: u65 = 99,
 
-    pub fn init(self: *align(zoop.alignment) Sub, name: []const u8) void {
+    pub fn init(self: *Sub, name: []const u8) void {
         self.super.init(name);
         const n = self.super.getName();
         if (n.len < 0) @panic("message: []const u8");
@@ -203,7 +203,7 @@ pub const SubSub = struct {
     pub const extends = .{ IAge, IHuman };
     super: Sub align(zoop.alignment),
 
-    pub fn init(self: *align(zoop.alignment) SubSub, name: []const u8) void {
+    pub fn init(self: *SubSub, name: []const u8) void {
         self.super.init(name);
     }
 
@@ -214,21 +214,20 @@ pub const SubSub = struct {
 
 pub const Custom = struct {
     pub const extends = .{ zoop.IFormat, ISetName };
-    const Self = *align(zoop.alignment) @This();
 
     super: SubSub align(zoop.alignment),
-    age: u16 = 99,
-    pub fn init(self: Self, name: []const u8) void {
+    age: u16 = 9999,
+    pub fn init(self: *Custom, name: []const u8) void {
         self.super.init(name);
     }
 
     // override
-    pub fn getName(_: Self) []const u8 {
+    pub fn getName(_: *Custom) []const u8 {
         return "custom";
     }
 
     // override
-    pub fn getAge(_: Self) u8 {
+    pub fn getAge(_: *Custom) u8 {
         return 88;
     }
 
@@ -301,6 +300,9 @@ test "zoop" {
 
         // test stack address
         var custom = zoop.make(Custom, null);
+        custom.class.init("sub");
+        var pcustom = &custom.class;
+        pcustom.init("sub");
         custom.class.init("sub");
         var intbase = @intFromPtr(&custom);
         var intss = @intFromPtr(klassPtr(&custom.class.super));
@@ -381,9 +383,8 @@ test "zoop" {
 
         // test default field value
         custom = zoop.make(Custom, null);
-        try t.expect(custom.class.age == 99);
+        try t.expect(custom.class.age == 9999);
         try t.expectEqualStrings(custom.class.super.super.super.name, "default");
-        // try t.expect(zoop.getAllocator(&custom) == null);
 
         // test heap address
         psubsub = try zoop.new(t.allocator, SubSub, null);
@@ -405,7 +406,7 @@ test "zoop" {
         try t.expect(@intFromPtr(zoop.Klass(Human).from(&psubsub.super.super)) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
         try t.expect(@intFromPtr(zoop.Klass(Sub).from(&psubsub.super)) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
 
-        //TODO: fix zoop.getAllocator() bug to pass tests below
+        //test getAllocator
         try t.expect(zoop.getAllocator(ihuman).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(ihuman).?.ptr == zoop.getAllocator(psubsub).?.ptr);
         try t.expect(zoop.getAllocator(psubsub).?.ptr == t.allocator.ptr);
@@ -417,6 +418,16 @@ test "zoop" {
         std.debug.print("ihuman: {}\n", .{zoop.cast(ihuman, zoop.IObject)});
         zoop.destroy(ihuman);
 
+        // test getField
+        const ccustom = zoop.make(Custom, null);
+        const pccustom = &ccustom.class;
+        var pfield8 = zoop.getField(pccustom, "age", u8);
+        pfield8 = pfield8;
+        try t.expect(@typeInfo(@TypeOf(pfield8)).Pointer.is_const);
+        try t.expect(pfield8.* == 99);
+        const pfield16 = zoop.getField(pccustom, "age", u16);
+        try t.expect(pfield16.* == 9999);
+
         // test destroy
         psubsub = try zoop.new(t.allocator, SubSub, null);
         zoop.destroy(psubsub);
@@ -424,10 +435,10 @@ test "zoop" {
         zoop.destroy(zoop.cast(psubsub, IHuman));
         psubsub = try zoop.new(t.allocator, SubSub, null);
         zoop.destroy(zoop.cast(psubsub, Human));
-        var pcustom = try zoop.new(t.allocator, Custom, null);
+        pcustom = try zoop.new(t.allocator, Custom, null);
         zoop.destroy(zoop.cast(pcustom, Human));
         pcustom = try zoop.new(t.allocator, Custom, null);
-        zoop.destroy(zoop.cast(pcustom, IHuman));
+        zoop.destroy(zoop.cast(pcustom, zoop.IObject));
         pcustom = try zoop.new(t.allocator, Custom, null);
         zoop.destroy(zoop.cast(pcustom, Sub));
     }

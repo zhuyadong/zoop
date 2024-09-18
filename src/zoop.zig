@@ -102,24 +102,27 @@ pub fn setHook(new_hook: ?HookFunc, destroy_hook: ?HookFunc) void {
 }
 
 /// get field of special type from any's inherit tree
-pub fn getField(any: anytype, comptime name: []const u8, comptime T: type) *T {
-    const V = @TypeOf(any);
-    switch (@typeInfo(V)) {
-        else => @compileError(compfmt("zoop.getField(any): any must be a pointer to class/klass", .{})),
-        .Pointer => |p| {
-            if (isKlassType(p.child)) return getField(&any.class, name, T);
-            if (isClassType(p.child)) {
-                const offset = fieldOffset(p.child, name, T);
-                return @ptrFromInt(@intFromPtr(any) + offset);
-            }
-        },
+pub fn getField(any: anytype, comptime name: []const u8, comptime T: type) t: {
+    switch (pointerType(@TypeOf(any))) {
+        else => {},
+        .read => break :t *const T,
+        .write => break :t *T,
     }
+    @compileError(compfmt("zoop.getField(any): any must be *Class/*Klass", .{}));
+} {
+    const V = std.meta.Child(@TypeOf(any));
+    if (isKlassType(V)) return getField(&any.class, name, T);
+    if (isClassType(V)) {
+        const offset = fieldOffset(V, name, T);
+        return @ptrFromInt(@intFromPtr(any) + offset);
+    }
+    @compileError(compfmt("{s} is not Class/Klass.", .{@typeName(V)}));
 }
 
-/// get method of klass/class
+/// get method of Klass/Class
 pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name) {
     comptime {
-        if (!isClassType(T) and !isKlassType(T)) @compileError(compfmt("{s} is not an klass/class type.", .{@typeName(T)}));
+        if (!isClassType(T) and !isKlassType(T)) @compileError(compfmt("{s} is not an Klass/Class type.", .{@typeName(T)}));
 
         return (struct {
             pub const method = blk: {
@@ -144,10 +147,10 @@ pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name
     }
 }
 
-/// get method of klass/class' super class
+/// get method of Klass/Class' super class
 pub fn getUpMethod(comptime T: type, comptime name: []const u8) UpMethodType(T, name) {
     comptime {
-        if (!isClassType(T) and !isKlassType(T)) @compileError(compfmt("{s} is not an klass/class type.", .{@typeName(T)}));
+        if (!isClassType(T) and !isKlassType(T)) @compileError(compfmt("{s} is not an Klass/Class type.", .{@typeName(T)}));
 
         const Class = if (isKlassType(T)) T.Class else T;
         const Super = blk: {
@@ -306,7 +309,7 @@ pub fn ApiEnum(comptime I: type) type {
 }
 
 pub fn MethodEnum(comptime T: type) type {
-    const Class = if (isKlassType(T)) T.Class else if (isClassType(T) or isInterfaceType(T)) T else @compileError(compfmt("{s} is not klass/class/interface.", .{@typeName(T)}));
+    const Class = if (isKlassType(T)) T.Class else if (isClassType(T) or isInterfaceType(T)) T else @compileError(compfmt("{s} is not Klass/Class/Interface.", .{@typeName(T)}));
 
     const supers = if (isInterfaceType(T)) interfaces(T) else classes(Class);
     const count = blk: {
@@ -516,7 +519,7 @@ pub fn destroy(any: anytype) void {
             },
         }
     }
-    @compileError(compfmt("'{s}' is not a pointer to class/klass.", .{@typeName(@TypeOf(any))}));
+    @compileError(compfmt("'{s}' is not a *Klass/*Class.", .{@typeName(@TypeOf(any))}));
 }
 
 pub fn make(comptime T: type, init: ?T) Klass(T) {
@@ -535,7 +538,7 @@ pub fn icall(iface: anytype, comptime api_enum: ApiEnum(@TypeOf(iface)), args: a
     return @call(.auto, @field(vptr, @tagName(api_enum)), .{ptr} ++ args);
 }
 
-/// call interface method of klass/class. (virtual call)
+/// call interface method of Klass/Class. (virtual call)
 /// example: zoop.vcall(pclass, IHuman.getName, .{})
 pub fn vcall(any: anytype, comptime method: anytype, args: anytype) ApiInfo(method).Return {
     comptime {
@@ -547,8 +550,8 @@ pub fn vcall(any: anytype, comptime method: anytype, args: anytype) ApiInfo(meth
                 pass = isKlassType(p.child) or isClassType(p.child);
             },
         }
-        if (!pass) @compileError("vcall(any) where any must be *class/*klass/interface");
-        if (!isInterfaceType(ApiInfo(method).Iface)) @compileError(compfmt("{s} is not an interface.", .{@typeName(ApiInfo(method).Iface)}));
+        if (!pass) @compileError(compfmt("'{s}' is not *Klass/*Class/interface.", .{@typeName(@TypeOf(any))}));
+        if (!isInterfaceType(ApiInfo(method).Iface)) @compileError(compfmt("'{s}'' is not Interface.", .{@typeName(ApiInfo(method).Iface)}));
     }
     const info = ApiInfo(method);
     if (canCast(@TypeOf(any), info.Iface)) {
@@ -578,7 +581,7 @@ pub fn upcall(any: anytype, comptime method_enum: MethodEnum(std.meta.Child(@Typ
             }
         },
     }
-    @compileError("upcall(any, ...) where any must be *class/*klass.");
+    @compileError(compfmt("'{s}' is not *Klass/*Class.", .{@typeName(@TypeOf(any))}));
 } {
     const T = comptime std.meta.Child(@TypeOf(any));
     const Class = comptime if (isKlassType(T)) T.Class else T;
@@ -595,7 +598,7 @@ pub fn isRootPtr(ptr: anytype) bool {
     } else if (isKlassType(T)) {
         return classInfo(ptr) == makeClassInfo(T.Class);
     }
-    @compileError(compfmt("{s} is not a class/klass.", .{@typeName(T)}));
+    @compileError(compfmt("{s} is not *Klass/*Class.", .{@typeName(T)}));
 }
 
 pub fn getAllocator(any: anytype) ?std.mem.Allocator {
@@ -619,14 +622,14 @@ pub fn getAllocator(any: anytype) ?std.mem.Allocator {
             }
         },
     }
-    @compileError(compfmt("zoop.getAllocator(any) where any must be *klass/*class/interface", .{}));
+    @compileError(compfmt("'{s}' is not *Klass/*Class/interface.", .{@typeName(@TypeOf(any))}));
 }
 
 pub fn cast(any: anytype, comptime T: type) t: {
     break :t if (isInterfaceType(T)) T else switch (pointerType(@TypeOf(any))) {
         .read => *const T,
         .write => *T,
-        else => @compileError(compfmt("zoop.cast(any, T): any must be interface or pointer to class but '{}'.", .{@typeName(@TypeOf(any))})),
+        else => @compileError(compfmt("'{s}' is not *Class/interface.", .{@typeName(@TypeOf(any))})),
     };
 } {
     const caster = comptime Caster(@TypeOf(any), T);
@@ -640,7 +643,7 @@ pub fn as(any: anytype, comptime T: type) t: {
     break :t if (isInterfaceType(T)) ?T else switch (pointerType(@TypeOf(any))) {
         .read => ?*const T,
         .write => ?*T,
-        else => if (isInterfaceType(@TypeOf(any))) ?*T else @compileError(compfmt("zoop.cast(any:{s}, T:{s}): any must be *klass/*class/interface but '{s}'.", .{ @typeName(@TypeOf(any)), @typeName(T), @typeName(@TypeOf(any)) })),
+        else => if (isInterfaceType(@TypeOf(any))) ?*T else @compileError(compfmt("'{s}' is not *Klass/*Class/interface.", .{@typeName(@TypeOf(any))})),
     };
 } {
     const V = @TypeOf(any);
@@ -680,26 +683,26 @@ pub fn asptr(any: anytype) *anyopaque {
             if (isClassType(p.child)) return @ptrCast(Klass(p.child).from(any));
         },
     }
-    @compileError("zoop.asptr(any) where any must be *klass/*class/interface.");
+    @compileError(compfmt("'{s}' is not *Klass/*Class/interface.", .{@typeName(@TypeOf(any))}));
 }
 
 pub fn nil(comptime I: type) I {
     comptime {
-        if (!isInterfaceType(I)) @compileError(@typeName(I) ++ " is not interface.");
+        if (!isInterfaceType(I)) @compileError(@typeName(I) ++ " is not Interface.");
     }
     return Nil.of(I);
 }
 
 pub fn isNil(any: anytype) bool {
     comptime {
-        if (!isInterfaceType(@TypeOf(any))) @compileError("zoop.isNil(any): any must be interface.");
+        if (!isInterfaceType(@TypeOf(any))) @compileError(compfmt("'{s}' is not interface", .{@typeName(@TypeOf(any))}));
     }
     return any.ptr == Nil.ptr();
 }
 
 pub fn format(ptr: anytype, writer: anytype) anyerror!void {
     comptime {
-        if (@typeInfo(@TypeOf(ptr)) != .Pointer) @compileError("zoop.format(ptr) where ptr must be a pointer.");
+        if (@typeInfo(@TypeOf(ptr)) != .Pointer) @compileError(compfmt("'{s}' is not pointer.", .{@typeName(@TypeOf(ptr))}));
     }
     const T = std.meta.Child(@TypeOf(ptr));
     const typeinfo = typeInfo(T);
@@ -905,7 +908,7 @@ fn ClassInfoGetter(comptime T: type) type {
             }
         },
     }
-    @compileError(compfmt("zoop.classInfo(any) where any must be Class/*class/Klass/*klass/interface, but: {s}", .{@typeName(T)}));
+    @compileError(compfmt("'{s}' is not Class/*Class/Klass/*Klass/Interface.", .{@typeName(T)}));
 }
 
 fn formatFunc(comptime T: type) *const FormatFunc {
@@ -1039,7 +1042,7 @@ fn makeTypeId(comptime T: type) type_id {
 }
 
 fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
-    if (!isKlassType(T) and !isClassType(T)) @compileError(compfmt("{s} is not klass/class.", .{@typeName(T)}));
+    if (!isKlassType(T) and !isClassType(T)) @compileError(compfmt("{s} is not Klass/Class.", .{@typeName(T)}));
     if (!isInterfaceType(I)) @compileError(compfmt("{s} is not interface.", .{@typeName(I)}));
 
     const VT = Vtable(I);
@@ -1062,7 +1065,7 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
                     const defval = @as(*align(1) const field.type, @ptrCast(def_ptr)).*;
                     @field(val, field.name) = defval;
                 } else {
-                    @compileError(compfmt("{s} must implement method '{s}:{}'", .{ @typeName(T), field.name, field.type }));
+                    @compileError(compfmt("{s} must implement method '{s}: {}'", .{ @typeName(T), field.name, field.type }));
                 }
             }
             break :blk val;
@@ -1169,7 +1172,7 @@ fn interfaces(comptime T: type) Tuple {
                         for (extends) |iface| {
                             if (isInterfaceType(iface)) {
                                 ret = tupleAppendUnique(ret, interfaces(iface));
-                            } else @compileError(compfmt("{s} in {s}.extends but is not an interface type.", .{ @typeName(iface), @typeName(T) }));
+                            } else @compileError(compfmt("{s} in {s}.extends but is not Interface.", .{ @typeName(iface), @typeName(T) }));
                         }
                     }
                 },
