@@ -164,14 +164,14 @@ pub const INameAndAge struct {
 // and inherited methods will not be affected.
 pub const INameAndAge struct {
     pub const extends = .{IName, IAge};
-    // exclude “ignoreMe" method
-    pub const excludes = .{"ignoreMe"};
+    // exclude “eql" method
+    pub const excludes = .{"eql"};
 
     ptr: *anyopaque,
     vptr: *anyopaque,
 
-    pub fn ignoreMe(self: INameAndAge) void {
-        zoop.icall(self, .ignoreMe, .{});
+    pub fn eql(self: INameAndAge, other: INameAndAge) bool {
+        return self.ptr == other.ptr;
     }
 }
 ```

@@ -157,14 +157,14 @@ pub const INameAndAge struct {
 // 只能指定本接口内定义的方法，不会影响继承来的方法
 pub const INameAndAge struct {
     pub const extends = .{IName, IAge};
-    // 不要包含 “ignoreMe" 方法
-    pub const excludes = .{"ignoreMe"};
+    // 不要包含 “eql" 方法
+    pub const excludes = .{"eql"};
 
     ptr: *anyopaque,
     vptr: *anyopaque,
 
-    pub fn ignoreMe(self: INameAndAge) void {
-        zoop.icall(self, .ignoreMe, .{});
+    pub fn eql(self: INameAndAge, other: INameAndAge) bool {
+        return self.ptr == other.ptr;
     }
 }
 ```
