@@ -33,6 +33,7 @@ pub const Human = struct {
     }
 };
 ```
+
 ## Creating and destroying class objects
 ```zig
 const t = std.testing;
@@ -59,6 +60,9 @@ human = zoop.make(Human, .{.name = "StackObj", .age = 2});
 try t.expect(phuman.age == 1);
 try t.expect(human.ptr().age == 2);
 ```
+Note about `deinit`:
+`zoop.destroy` will sequentially call the `deinit` method of the class and all its parent classes
+
 ## Inheritance
 ```zig
 // Define `SuperMan`, inherit from `Human`, 
@@ -97,6 +101,7 @@ try t.expect(psuper_age.* == 9999);
 // Note that if two `age` are of the same type and both are called "age",
 // The above `zoop.getField` call will cause a compilation error to avoid bugs
 ```
+
 ## Class type conversion
 ```zig
 // First create a Human and a SuperMan
@@ -108,8 +113,8 @@ t.expect(zoop.as(psuper, Human) != null);
 t.expect(zoop.cast(psuper, Human).age == 30);
 // The parent class cannot be converted to a subclass (if `zoop.cast` is used, a compilation error will occur)
 t.expect(zoop.as(phuman, SuperMan) == null);
-
 ```
+
 ## Define the interface
 ```zig
 // Define an interface `IName` for accessing names
@@ -143,6 +148,7 @@ pub const IAge = struct {
     }
 }
 ```
+
 ## Implementing the interface
 ```zig
 // We let `Human` implement the `IName` interface
@@ -166,6 +172,7 @@ pub const SuperMan = struct {
     ...
 }
 ```
+
 ## Converting between classes and interfaces
 ```zig
 // First create a Human and a SuperMan
@@ -204,6 +211,7 @@ To summarize `cast` and `as`:
     - Class -> Interfaces implemented by the class and its parent class
 - `as` is applicable
     - All the cases where `cast` is applicable and not applicable (everything can be `as`)
+
 ## Method overriding and virtual method calls
 ```zig
 // If SuperMan overrides the getName method

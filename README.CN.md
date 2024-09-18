@@ -33,6 +33,7 @@ pub const Human = struct {
     }
 };
 ```
+
 ## 创建和销毁类对象
 ```zig
 const t = std.testing;
@@ -57,6 +58,9 @@ human = zoop.make(Human, .{.name = "StackObj", .age = 2});
 try t.expect(phuman.age == 1);
 try t.expect(human.ptr().age == 2);
 ```
+关于调用 `deinit`:
+`zoop.destroy`会依次调用类及其所有父类的 `deinit` 方法（如果有）
+
 ## 继承
 ```zig
 // 定义 `SuperMan`，继承自 `Human`，父类必须是第一个字段且对齐为 `zoop.alignment`，
@@ -92,6 +96,7 @@ try t.expect(psuper_age.* == 9999);
 // 要注意的是，如果两个`age`都是同样类型，又都叫 "age"，
 // 那上面的 `zoop.getField`调用会导致编译错误，以避免 bug
 ```
+
 ## 类的类型转换
 ```zig
 // 先创建一个 Human，一个 SuperMan
@@ -103,8 +108,8 @@ t.expect(zoop.as(psuper, Human) != null);
 t.expect(zoop.cast(psuper, Human).age == 30);
 // 父类不能转成子类 (如果用 `zoop.cast` 就会编译错)
 t.expect(zoop.as(phuman, SuperMan) == null);
-
 ```
+
 ## 定义接口
 ```zig
 // 定义个用来访问名字的接口 `IName`
@@ -137,6 +142,7 @@ pub const IAge = struct {
     }
 }
 ```
+
 ## 实现接口
 ```zig
 // 我们让 `Human` 实现 `IName` 接口
@@ -158,6 +164,7 @@ pub const SuperMan = struct {
     ...
 }
 ```
+
 ## 类和接口之间转换
 ```zig
 // 先创建一个 Human，一个 SuperMan
@@ -194,6 +201,7 @@ try t.expect(zoop.as(iobj, SuperMan).? == psuper);
   - 类 -> 类及其父类实现的接口
 - `as`适用的情况
   - 所有`cast`适用和不适用的情况 (万物都可`as`)
+
 ## 方法重写和虚方法调用
 ```zig
 // 假如 SuperMan 重写了 getName 方法
