@@ -104,10 +104,13 @@ var phuman = try zoop.new(t.allocator, Human, null);
 var psuper = try zoop.new(t.allocator, SuperMan, null);
 
 // 子类可以转成父类
-t.expect(zoop.as(psuper, Human) != null);
-t.expect(zoop.cast(psuper, Human).age == 30);
+try t.expect(zoop.as(psuper, Human) != null);
+try t.expect(zoop.cast(psuper, Human).age == 30);
 // 父类不能转成子类 (如果用 `zoop.cast` 就会编译错)
-t.expect(zoop.as(phuman, SuperMan) == null);
+try t.expect(zoop.as(phuman, SuperMan) == null);
+// 指向子类的父类指针可以转换成子类
+phuman = zoop.cast(psuper, Human);
+try t.expect(zoop.as(phuman, SuperMan) != null);
 ```
 
 ## 定义接口

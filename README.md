@@ -113,6 +113,9 @@ t.expect(zoop.as(psuper, Human) != null);
 t.expect(zoop.cast(psuper, Human).age == 30);
 // The parent class cannot be converted to a subclass (if `zoop.cast` is used, a compilation error will occur)
 t.expect(zoop.as(phuman, SuperMan) == null);
+// A parent class pointer to a subclass can be converted to a subclass
+phuman = zoop.cast(psuper, Human);
+try t.expect(zoop.as(phuman, SuperMan) != null);
 ```
 
 ## Define the interface
