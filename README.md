@@ -155,6 +155,16 @@ pub const INameAndAge struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
 }
+
+// can specify exclude APIs
+pub const INameAndAge struct {
+    pub const extends = .{IName, IAge};
+    // exclude "setName" API
+    pub const excludes = .{"setName"};
+
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+}
 ```
 
 ## Implementing the interface

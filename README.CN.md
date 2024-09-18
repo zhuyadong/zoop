@@ -149,6 +149,17 @@ pub const INameAndAge struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
 }
+
+// 可以指定接口中哪些方法不包含到接口 API 中
+pub const INameAndAge struct {
+    pub const extends = .{IName, IAge};
+    // 不要包含 “setName" 方法
+    pub const excludes = .{"setName"};
+
+    ptr: *anyopaque,
+    vptr: *anyopaque,
+}
+
 ```
 
 ## 实现接口
