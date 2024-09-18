@@ -46,8 +46,8 @@ pub const ClassInfo = struct {
         comptime {
             if (!tupleHas(interfaces(T), I)) @compileError(compfmt("{s} don't support interface:{s}", .{ @typeName(T), @typeName(I) }));
         }
-        assert(interfaceIndex(T, I) < self.vtables.len);
-        return @ptrCast(@alignCast(self.vtables[interfaceIndex(T, I)].vtable));
+        assert(comptime interfaceIndex(T, I) < self.vtables.len);
+        return @ptrCast(@alignCast(self.vtables[comptime interfaceIndex(T, I)].vtable));
     }
 };
 

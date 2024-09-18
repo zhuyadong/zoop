@@ -175,8 +175,6 @@ pub const Human = struct {
     pub fn formatAny(self: Self, writer: std.io.AnyWriter) anyerror!void {
         const classinfo = zoop.classInfo(self);
         try writer.print("{s}{{.age = {}, .name='{s}'}}\n", .{ classinfo.typeinfo.typename, self.age, self.name });
-        const ilist = &.{ 1, 2, 3, 4 };
-        try zoop.format(ilist, writer);
     }
 };
 
