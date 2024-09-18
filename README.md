@@ -19,7 +19,7 @@ pub const Human = struct {
     name: []const u8 align(zoop.alignment),
     age: u8 = 30,
 
-    // If there is no cleanup work, you can not define `deinit`
+    // If there is no cleanup work, can skip define `deinit`
     pub fn deinit(self: *Human) void {
         self.name = "";
     }
@@ -79,11 +79,13 @@ pub const SuperMan = struct {
 var psuperman = zoop.new(t.allocator, SuperMan, null);
 //Call parent class method
 psuperman.super.setName("super");
-// Or call the parent class method like this. This method is suitable for situations where the inheritance hierarchy is too deep and you don't know which parent class implements the `setName` method.
+// Or call the parent class method like this. This method is suitable for situations where the
+// inheritance hierarchy is too deep and you don't know which parent class implements the `setName` method.
 // In addition, since it is called `upcall`, it means that even if `SuperMan` implements `setName`,
 // The following call will still call the `setName` method of the nearest parent class
 zoop.upcall(psuperman, .setName, .{"super"});
-// You can also flexibly access all fields in the class inheritance tree. For example, if you want to access the `Human.age` field, you can do this:
+// You can also flexibly access all fields in the class inheritance tree. For example,
+// if you want to access the `Human.age` field, you can do this:
 var phuman_age = zoop.getField(psuperman, "age", u8);
 try t.expect(phuman_age.* == 30);
 // Access `SuperMan.age`, you can do this:
@@ -150,8 +152,10 @@ pub const SuperMan = struct {
     pub const extends = .{IAge};
     ...//Same as above code
 }
-// The interface implemented by the parent class is automatically implemented by the class, so `SuperMan` also implements `IName`, although it only declares that it implements `IAge`.
-// A subclass can repeatedly declare that it implements an interface that has already been implemented by its parent class. This will not cause any problems and will not affect the results.
+// The interface implemented by the parent class is automatically implemented by the class,
+// so `SuperMan` also implements `IName`, although it only declares that it implements `IAge`.
+// A subclass can repeatedly declare that it implements an interface that has already been implemented 
+// by its parent class. This will not cause any problems and will not affect the results.
 // For example, the following code is equivalent to the above:
 pub const SuperMan = struct {
     pub const extends = .{IAge, IName};
