@@ -39,7 +39,7 @@ pub const Human = struct {
 const t = std.testing;
 
 // Create a `Human` on the heap
-var phuman = zoop.new(t.allocator, Human, null);
+var phuman = try zoop.new(t.allocator, Human, null);
 // If the class field has a default value, the object field will be initialized to the default value
 try t.expect(phuman.age == 30);
 // Destroy the object and release the memory.
@@ -55,7 +55,7 @@ try t.expect(human.ptr().age == 30);
 zoop.destroy(human.ptr());
 
 // Both `zoop.new` and `zoop.make` support creation-time initialization
-phuman = zoop.new(t.allocator, Human, .{.name = "HeapObj", .age = 1});
+phuman = try zoop.new(t.allocator, Human, .{.name = "HeapObj", .age = 1});
 human = zoop.make(Human, .{.name = "StackObj", .age = 2});
 try t.expect(phuman.age == 1);
 try t.expect(human.ptr().age == 2);
@@ -83,7 +83,7 @@ pub const SuperMan = struct {
 };
 
 // First create a `SuperMan` object
-var psuperman = zoop.new(t.allocator, SuperMan, null);
+var psuperman = try zoop.new(t.allocator, SuperMan, null);
 //Call parent class method
 psuperman.super.setName("super");
 // Or call the parent class method like this. This method is suitable for situations where the
@@ -105,8 +105,8 @@ try t.expect(psuper_age.* == 9999);
 ## Class type conversion
 ```zig
 // First create a Human and a SuperMan
-var phuman = zoop.new(t.allocator, Human, null);
-var psuper = zoop.new(t.allocator, SuperMan, null);
+var phuman = try zoop.new(t.allocator, Human, null);
+var psuper = try zoop.new(t.allocator, SuperMan, null);
 
 // Subclasses can be converted to parent classes
 t.expect(zoop.as(psuper, Human) != null);
@@ -184,8 +184,8 @@ pub const SuperMan = struct {
 ## Converting between classes and interfaces
 ```zig
 // First create a Human and a SuperMan
-var phuman = zoop.new(t.allocator, Human, .{.name = "human"});
-var psuper = zoop.new(t.allocator, SuperMan, .{.super = .{.name = "super"}});
+var phuman = try zoop.new(t.allocator, Human, .{.name = "human"});
+var psuper = try zoop.new(t.allocator, SuperMan, .{.super = .{.name = "super"}});
 
 // Human implements IName, so it can be converted
 var iname = zoop.cast(phuman, IName);
@@ -232,7 +232,7 @@ pub const SuperMan = struct {
 }
 
 // Now IName.getName will call SuperMan.getName instead of Human.getName
-var psuper = zoop.new(t.allocator, SuperMan, .{.super = .{.name = "human"}});
+var psuper = try zoop.new(t.allocator, SuperMan, .{.super = .{.name = "human"}});
 var iname = zoop.cast(psuper, IName);
 try t.expectEqualStrings(iname.getName(), "override");
 // Another style of calling interface methods
@@ -245,3 +245,22 @@ try t.expectEqualStrings(zoop.vcall(phuman, IName.getName, .{}), "override");
 ```
 Performance notes for `vcall`:
 `vcall` will use `cast` when possible, and `as` otherwise
+
+## Interface `zoop.IFormat` for print
+`zoop.IFormat` can conveniently output the string content of the object through the `format(...)` mechanism of `std.fmt`.
+```zig
+// define a class that implemented `zoop.IFormat`
+pub const SomeClass = struct {
+    pub const extends = .{zoop.IFormat};
+    name:[]const u8 align(zoop.alignment) = "some";
+
+    pub fn formatAny(self: *SomeClass, writer: std.io.AnyWriter) anyerror!void {
+        try writer.print("SomeClass.name = {s}", .{self.name});
+    }
+}
+
+// print string from `SomeClass.formatAny` 
+const psome = try zoop.new(t.allocator, SomeClass, null);
+std.debug.print("{}\n", .{zoop.cast(psome, zoop.IFormat)});
+// output: SomeClass.name = some
+```

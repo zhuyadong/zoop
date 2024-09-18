@@ -39,7 +39,7 @@ pub const Human = struct {
 const t = std.testing;
 
 // 在堆上创建一个 `Human`
-var phuman = zoop.new(t.allocator, Human, null);
+var phuman = try zoop.new(t.allocator, Human, null);
 // 类字段如果有缺省值，则对象字段就会初始化为缺省值
 try t.expect(phuman.age == 30);
 // 销毁对象，释放内存。如果类定义了`deinit`，则会先调用`deinit`，然后释放内存。
@@ -53,7 +53,7 @@ try t.expect(human.ptr().age == 30);
 zoop.destroy(human.ptr());
 
 // `zoop.new`和`zoop.make`都支持创建时初始化
-phuman = zoop.new(t.allocator, Human, .{.name = "HeapObj", .age = 1});
+phuman = try zoop.new(t.allocator, Human, .{.name = "HeapObj", .age = 1});
 human = zoop.make(Human, .{.name = "StackObj", .age = 2});
 try t.expect(phuman.age == 1);
 try t.expect(human.ptr().age == 2);
@@ -80,7 +80,7 @@ pub const SuperMan = struct {
 };
 
 // 先创建一个 `SuperMan` 对象
-var psuperman = zoop.new(t.allocator, SuperMan, null);
+var psuperman = try zoop.new(t.allocator, SuperMan, null);
 // 调用父类方法
 psuperman.super.setName("super");
 // 或者这样调用父类方法，这种方法适合继承层次太深，已经不知道哪个父亲实现了`setName`方法的情况。
@@ -100,8 +100,8 @@ try t.expect(psuper_age.* == 9999);
 ## 类的类型转换
 ```zig
 // 先创建一个 Human，一个 SuperMan
-var phuman = zoop.new(t.allocator, Human, null);
-var psuper = zoop.new(t.allocator, SuperMan, null);
+var phuman = try zoop.new(t.allocator, Human, null);
+var psuper = try zoop.new(t.allocator, SuperMan, null);
 
 // 子类可以转成父类
 t.expect(zoop.as(psuper, Human) != null);
@@ -176,8 +176,8 @@ pub const SuperMan = struct {
 ## 类和接口之间转换
 ```zig
 // 先创建一个 Human，一个 SuperMan
-var phuman = zoop.new(t.allocator, Human, .{.name = "human"});
-var psuper = zoop.new(t.allocator, SuperMan, .{.super = .{.name = "super"}});
+var phuman = try zoop.new(t.allocator, Human, .{.name = "human"});
+var psuper = try zoop.new(t.allocator, SuperMan, .{.super = .{.name = "super"}});
 
 // Human 实现了 IName，所以可以转
 var iname = zoop.cast(phuman, IName);
@@ -222,7 +222,7 @@ pub const SuperMan = struct {
 }
 
 // 现在 IName.getName 将会调用 SuperMan.getName 而不是 Human.getName
-var psuper = zoop.new(t.allocator, SuperMan, .{.super = .{.name = "human"}});
+var psuper = try zoop.new(t.allocator, SuperMan, .{.super = .{.name = "human"}});
 var iname = zoop.cast(psuper, IName);
 try t.expectEqualStrings(iname.getName(), "override");
 // 另一种调用接口方法的风格
@@ -235,3 +235,22 @@ try t.expectEqualStrings(zoop.vcall(phuman, IName.getName, .{}), "override");
 ```
 `vcall`的性能说明：
 `vcall`会在能使用`cast`的情况下使用`cast`，否则使用`as`
+
+## 调试用接口 `zoop.IFormat`
+`zoop.IFormat`能方便通过 `std.fmt` 的 `format(...)`机制来输出对象的字符串形式内容。
+```zig
+// 定义一个实现 `zoop.IFormat`的类
+pub const SomeClass = struct {
+    pub const extends = .{zoop.IFormat};
+    name:[]const u8 align(zoop.alignment) = "some";
+
+    pub fn formatAny(self: *SomeClass, writer: std.io.AnyWriter) anyerror!void {
+        try writer.print("SomeClass.name = {s}", .{self.name});
+    }
+}
+
+// 下面代码就能输出 `SomeClass.formatAny` 的内容
+const psome = try zoop.new(t.allocator, SomeClass, null);
+std.debug.print("{}\n", .{zoop.cast(psome, zoop.IFormat)});
+// output: SomeClass.name = some
+```
