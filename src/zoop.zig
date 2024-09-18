@@ -93,6 +93,10 @@ pub const IFormat = struct {
     pub fn formatAny(self: IFormat, writer: std.io.AnyWriter) anyerror!void {
         try icall(self, "formatAny", .{writer});
     }
+
+    pub fn format(self: *const IFormat, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try (self.*).formatAny(if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any());
+    }
 };
 
 /// Set up hooks to monitor the creation and destruction of objects on the heap
@@ -564,7 +568,7 @@ pub fn vcall(any: anytype, comptime method: anytype, args: anytype) ApiInfo(meth
 }
 
 /// call super class's method.
-/// example: zoop.upcall(pclass, "methodOfSuperClass", .{});
+/// example: zoop.upcall(pclass, .methodOfSuperClass, .{});
 pub fn upcall(any: anytype, comptime method_enum: MethodEnum(std.meta.Child(@TypeOf(any))), args: anytype) t: {
     const T = @TypeOf(any);
     switch (@typeInfo(T)) {
@@ -971,26 +975,33 @@ fn initClass(pclass: anytype) void {
 
 fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) usize {
     const supers = classes(T);
+    comptime var owners = tupleInit(.{});
     inline for (supers.items) |V| {
         if (@hasField(V, name)) {
             if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
-                const pv: *allowzero V = @ptrFromInt(0);
-                const pf = &@field(pv, name);
-                return @intFromPtr(pf);
+                owners = tupleAppend(owners, V);
             }
         }
     }
-    @compileError(compfmt("no field named '{s}' in '{s}'", .{ name, @typeName(T) }));
+    switch (owners.items.len) {
+        0 => @compileError(compfmt("no field of type '{s}' named '{s}' in '{s}'", .{ @typeName(FT), name, @typeName(T) })),
+        1 => {
+            const V = owners.items[0];
+            const pv: *allowzero V = @ptrFromInt(0);
+            const pf = &@field(pv, name);
+            return @intFromPtr(pf);
+        },
+        else => @compileError(compfmt("more than one field of type '{s}' named '{s}' found: {}", .{ @typeName(FT), name, owners.items })),
+    }
 }
 
 fn classChecker(comptime T: type) *const ClassCheckFunc {
-    comptime {
-        if (!isClassType(T)) @compileError("unsupport type: " ++ @typeName(T));
-    }
+    if (!isClassType(T)) @compileError(compfmt("'{s}' is not Class.", .{@typeName(T)}));
+
     return (struct {
         pub fn func(class_id: type_id) bool {
-            inline for (classes(T).items) |class| {
-                if (class_id == makeTypeId(class)) return true;
+            inline for (classes(T).items) |Class| {
+                if (class_id == makeTypeId(Class)) return true;
             }
             return false;
         }
