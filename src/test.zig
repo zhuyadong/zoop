@@ -9,6 +9,9 @@ fn assert(b: bool) void {
 }
 
 pub fn main() !void {
+    if (zoop.interfaceIndex(IAge, zoop.IObject) == comptime zoop.interfaceIndex(IHuman, zoop.IObject)) {
+        std.debug.print("", .{});
+    }
     if (false) {
         const s = try zoop.new(allocator, Sub, null);
         p = s;
@@ -24,56 +27,56 @@ pub fn main() !void {
         if (l > 0) {
             l = 0;
         }
+
+        var custom = zoop.make(Custom, null);
+        custom.class.init("sub");
+        var intbase = @intFromPtr(&custom);
+        var intss = @intFromPtr(klassPtr(&custom.class.super));
+        var ints = @intFromPtr(klassPtr(&custom.class.super.super));
+        var inth = @intFromPtr(klassPtr(&custom.class.super.super.super));
+        assert(intbase == intss);
+        assert(intbase == ints);
+        assert(intbase == inth);
+        intbase = @intFromPtr(&custom.class);
+        intss = @intFromPtr(&custom.class.super);
+        ints = @intFromPtr(&custom.class.super.super);
+        inth = @intFromPtr(&custom.class.super.super.super);
+        assert(intbase == intss);
+        assert(intbase == ints);
+        assert(intbase == inth);
+        assert(zoop.isRootPtr(&custom));
+        assert(zoop.isRootPtr(&custom.class));
+        assert(!zoop.isRootPtr(&custom.class.super));
+        assert(!zoop.isRootPtr(zoop.Klass(Sub).from(@ptrCast(@alignCast(&custom.class.super.super)))));
+        assert(custom.class.super.super.offset() == 0);
+
+        const psubsub = zoop.cast(&custom, SubSub);
+        const psub = zoop.cast(&custom, Sub);
+        const phuman = zoop.cast(&custom, Human);
+        const ihuman = zoop.cast(&custom, IHuman);
+        assert(zoop.classInfo(ihuman) == zoop.classInfo(psub));
+        assert(zoop.classInfo(psub) == zoop.classInfo(phuman));
+        const hinfo = zoop.classInfo(phuman);
+        const sinfo = zoop.classInfo(psub);
+        const ssinfo = zoop.classInfo(psubsub);
+        const cinfo = zoop.classInfo(&custom);
+        assert(hinfo == cinfo);
+        assert(sinfo == cinfo);
+        assert(ssinfo == cinfo);
+        assert(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Human, zoop.IFormat));
+        assert(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Sub, zoop.IFormat));
+        assert(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(SubSub, zoop.IFormat));
+        assert(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Human, IAge));
+        assert(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Sub, IAge));
+        assert(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(SubSub, IAge));
+        assert(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(Human, zoop.IObject));
+        assert(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(Sub, zoop.IObject));
+        assert(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(SubSub, zoop.IObject));
+        assert(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(Sub, IHuman));
+        assert(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(SubSub, IHuman));
+        assert(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(Sub, ISetName));
+        assert(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(SubSub, ISetName));
     }
-
-    var custom = zoop.make(Custom, null);
-    custom.class.init("sub");
-    var intbase = @intFromPtr(&custom);
-    var intss = @intFromPtr(klassPtr(&custom.class.super));
-    var ints = @intFromPtr(klassPtr(&custom.class.super.super));
-    var inth = @intFromPtr(klassPtr(&custom.class.super.super.super));
-    assert(intbase == intss);
-    assert(intbase == ints);
-    assert(intbase == inth);
-    intbase = @intFromPtr(&custom.class);
-    intss = @intFromPtr(&custom.class.super);
-    ints = @intFromPtr(&custom.class.super.super);
-    inth = @intFromPtr(&custom.class.super.super.super);
-    assert(intbase == intss);
-    assert(intbase == ints);
-    assert(intbase == inth);
-    assert(zoop.isRootPtr(&custom));
-    assert(zoop.isRootPtr(&custom.class));
-    assert(!zoop.isRootPtr(&custom.class.super));
-    assert(!zoop.isRootPtr(zoop.Klass(Sub).from(@ptrCast(@alignCast(&custom.class.super.super)))));
-    assert(custom.class.super.super.offset() == 0);
-
-    const psubsub = zoop.cast(&custom, SubSub);
-    const psub = zoop.cast(&custom, Sub);
-    const phuman = zoop.cast(&custom, Human);
-    const ihuman = zoop.cast(&custom, IHuman);
-    assert(zoop.classInfo(ihuman) == zoop.classInfo(psub));
-    assert(zoop.classInfo(psub) == zoop.classInfo(phuman));
-    const hinfo = zoop.classInfo(phuman);
-    const sinfo = zoop.classInfo(psub);
-    const ssinfo = zoop.classInfo(psubsub);
-    const cinfo = zoop.classInfo(&custom);
-    assert(hinfo == cinfo);
-    assert(sinfo == cinfo);
-    assert(ssinfo == cinfo);
-    assert(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Human, zoop.IFormat));
-    assert(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Sub, zoop.IFormat));
-    assert(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(SubSub, zoop.IFormat));
-    assert(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Human, IAge));
-    assert(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Sub, IAge));
-    assert(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(SubSub, IAge));
-    assert(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(Human, zoop.IObject));
-    assert(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(Sub, zoop.IObject));
-    assert(hinfo.getVtableOf(Custom, zoop.IObject) == sinfo.getVtableOf(SubSub, zoop.IObject));
-    assert(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(Sub, IHuman));
-    assert(hinfo.getVtableOf(Custom, IHuman) == sinfo.getVtableOf(SubSub, IHuman));
-    assert(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(Sub, ISetName));
-    assert(hinfo.getVtableOf(Custom, ISetName) == sinfo.getVtableOf(SubSub, ISetName));
 }
 
 fn zoopicall() @TypeOf(zoop.icall(i.?, "getName", .{})) {
