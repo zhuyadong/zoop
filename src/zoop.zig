@@ -13,8 +13,6 @@ const zoop = @This();
 pub const alignment = @alignOf(KlassHeader);
 pub const type_id = [*]const u8;
 pub const ClassCheckFunc = fn (class_id: type_id) bool;
-pub const TypeInfoGetFunc = fn () *const ClassInfo;
-pub const ClassPtrFunc = fn (*anyopaque) *anyopaque;
 
 pub const HookFunc = *const fn (obj: IObject) void;
 var destroy_hook_func: ?HookFunc = null;
