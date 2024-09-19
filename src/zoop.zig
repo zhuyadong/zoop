@@ -555,7 +555,7 @@ pub fn vcall(any: anytype, comptime method: anytype, args: anytype) ApiInfo(meth
         if (!isInterfaceType(ApiInfo(method).Iface)) @compileError(compfmt("'{s}'' is not Interface.", .{@typeName(ApiInfo(method).Iface)}));
     }
     const info = ApiInfo(method);
-    if (canCast(@TypeOf(any), info.Iface)) {
+    if (comptime canCast(@TypeOf(any), info.Iface)) {
         return icall(zoop.cast(any, info.Iface), info.name, args);
     }
     if (zoop.as(any, info.Iface)) |iface| {
