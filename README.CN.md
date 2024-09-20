@@ -269,12 +269,11 @@ try t.expectEqualStrings(zoop.vcall(phuman, IName.getName, .{}), "override");
 `vcall`的性能说明：
 `vcall`会在能使用`cast`的情况下使用`cast`，否则使用`as`
 
-## 调试用接口 `zoop.IFormat`
-`zoop.IFormat`能方便通过 `std.fmt` 的 `format(...)`机制来输出对象的字符串形式内容。
+## 调试用接口 `IObject.formatAny`
+`zoop.IObject`能方便通过 `std.fmt` 的 `format(...)`机制来输出对象的字符串形式内容。
 ```zig
-// 定义一个实现 `zoop.IFormat`的类
+// 定义一个实现 `zoop.IObject.formatAny`的类
 pub const SomeClass = struct {
-    pub const extends = .{zoop.IFormat};
     name:[]const u8 align(zoop.alignment) = "some";
 
     pub fn formatAny(self: *SomeClass, writer: std.io.AnyWriter) anyerror!void {
@@ -284,6 +283,6 @@ pub const SomeClass = struct {
 
 // 下面代码就能输出 `SomeClass.formatAny` 的内容
 const psome = try zoop.new(t.allocator, SomeClass, null);
-std.debug.print("{}\n", .{zoop.cast(psome, zoop.IFormat)});
+std.debug.print("{}\n", .{zoop.cast(psome, zoop.IObject)});
 // output: SomeClass.name = some
 ```

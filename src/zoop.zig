@@ -751,14 +751,38 @@ fn RealType(comptime T: type) type {
 
 fn DefaultMethodType(comptime T: type, comptime I: type, comptime name: []const u8) type {
     comptime {
-        if (@hasDecl(I, "Default")) {
-            const def = I.Default(T);
-            if (@hasDecl(def, name)) {
-                return @TypeOf(@field(def, name));
+        const ifaces = interfaces(I);
+        var all = tupleInit(.{});
+        for (ifaces.items) |iface| {
+            if (@hasDecl(iface, "Default")) {
+                const def = iface.Default(T);
+                if (@hasDecl(def, name)) {
+                    all = tupleAppend(all, iface);
+                }
             }
+        }
+        switch (all.items.len) {
+            0 => {},
+            1 => return @TypeOf(@field(all.items[0].Default(T), name)),
+            else => @compileError(compfmt("multi default method '{s}' found in: {}", .{ name, all.items })),
         }
 
         return void;
+    }
+}
+
+fn defaultMethod(comptime T: type, comptime I: type, comptime name: []const u8) DefaultMethodType(T, I, name) {
+    comptime {
+        const ifaces = interfaces(I);
+        for (ifaces.items) |iface| {
+            if (@hasDecl(iface, "Default")) {
+                const def = iface.Default(T);
+                if (@hasDecl(def, name)) {
+                    return @field(def, name);
+                }
+            }
+        }
+        unreachable;
     }
 }
 
@@ -1091,7 +1115,7 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
                         @field(val, field.name) = @ptrCast(&getMethod(T, field.name));
                     } else if (DefaultMethodType(T, I, field.name) != void) {
                         checkInterface(I);
-                        @field(val, field.name) = &@field(I.Default(T), field.name);
+                        @field(val, field.name) = @ptrCast(&defaultMethod(T, I, field.name));
                     } else {
                         @compileError(compfmt("{s} must implement method '{s}: {}'", .{ @typeName(T), field.name, field.type }));
                     }

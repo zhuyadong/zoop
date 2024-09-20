@@ -281,12 +281,11 @@ try t.expectEqualStrings(zoop.vcall(phuman, IName.getName, .{}), "override");
 Performance notes for `vcall`:
 `vcall` will use `cast` when possible, and `as` otherwise
 
-## Interface `zoop.IFormat` for print
-`zoop.IFormat` can conveniently output the string content of the object through the `format(...)` mechanism of `std.fmt`.
+## `zoop.IObject.formatAny` for print
+`zoop.IObject` can conveniently output the string content of the object through the `format(...)` mechanism of `std.fmt`.
 ```zig
-// define a class that implemented `zoop.IFormat`
+// define a class that implemented `zoop.IObject.formatAny`
 pub const SomeClass = struct {
-    pub const extends = .{zoop.IFormat};
     name:[]const u8 align(zoop.alignment) = "some";
 
     pub fn formatAny(self: *SomeClass, writer: std.io.AnyWriter) anyerror!void {
@@ -296,6 +295,6 @@ pub const SomeClass = struct {
 
 // print string from `SomeClass.formatAny` 
 const psome = try zoop.new(t.allocator, SomeClass, null);
-std.debug.print("{}\n", .{zoop.cast(psome, zoop.IFormat)});
+std.debug.print("{}\n", .{zoop.cast(psome, zoop.IObject)});
 // output: SomeClass.name = some
 ```
