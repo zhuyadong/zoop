@@ -149,7 +149,7 @@ pub const IHuman = struct {
 };
 
 pub const Human = struct {
-    pub const extends = .{ zoop.IFormat, IAge };
+    pub const extends = .{IAge};
     const Self = *Human;
     iface: IHuman align(zoop.alignment) = zoop.nil(IHuman),
     age: u8 = 99,
@@ -214,7 +214,7 @@ pub const SubSub = struct {
 };
 
 pub const Custom = struct {
-    pub const extends = .{ zoop.IFormat, ISetName };
+    pub const extends = .{ISetName};
 
     super: SubSub align(zoop.alignment),
     age: u16 = 9999,
@@ -346,9 +346,6 @@ test "zoop" {
         try t.expect(hinfo == cinfo);
         try t.expect(sinfo == cinfo);
         try t.expect(ssinfo == cinfo);
-        try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Human, zoop.IFormat));
-        try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(Sub, zoop.IFormat));
-        try t.expect(hinfo.getVtableOf(Custom, zoop.IFormat) == sinfo.getVtableOf(SubSub, zoop.IFormat));
         try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Human, IAge));
         try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(Sub, IAge));
         try t.expect(hinfo.getVtableOf(Custom, IAge) == sinfo.getVtableOf(SubSub, IAge));

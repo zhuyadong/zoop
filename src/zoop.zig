@@ -70,6 +70,22 @@ pub const Nil = struct {
 pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
+
+    pub fn formatAny(self: IObject, writer: std.io.AnyWriter) anyerror!void {
+        try icall(self, .formatAny, .{writer});
+    }
+
+    pub fn format(self: *const IObject, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try (self.*).formatAny(if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any());
+    }
+
+    pub fn Default(comptime Class: type) type {
+        return struct {
+            pub fn formatAny(self: *Class, writer: std.io.AnyWriter) anyerror!void {
+                try writer.print("{}", .{self});
+            }
+        };
+    }
 };
 
 pub const IRaw = struct {
@@ -78,19 +94,6 @@ pub const IRaw = struct {
 
     pub fn cast(self: IRaw, comptime I: type) I {
         return I{ .ptr = self.ptr, .vptr = self.vptr };
-    }
-};
-
-pub const IFormat = struct {
-    ptr: *anyopaque,
-    vptr: *anyopaque,
-
-    pub fn formatAny(self: IFormat, writer: std.io.AnyWriter) anyerror!void {
-        try icall(self, .formatAny, .{writer});
-    }
-
-    pub fn format(self: *const IFormat, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try (self.*).formatAny(if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any());
     }
 };
 
@@ -267,7 +270,7 @@ pub fn ApiEnum(comptime I: type) type {
         for (std.meta.declarations(I)) |decl| {
             const info = @typeInfo(@TypeOf(@field(I, decl.name)));
             if (info == .Fn and info.Fn.params.len > 0 and !info.Fn.is_generic) {
-                const first = info.Fn.params[0].type.?;
+                const first = info.Fn.params[0].type orelse unreachable;
                 const Self = switch (@typeInfo(first)) {
                     else => void,
                     .Struct => first,
@@ -746,6 +749,19 @@ fn RealType(comptime T: type) type {
     }
 }
 
+fn DefaultMethodType(comptime T: type, comptime I: type, comptime name: []const u8) type {
+    comptime {
+        if (@hasDecl(I, "Default")) {
+            const def = I.Default(T);
+            if (@hasDecl(def, name)) {
+                return @TypeOf(@field(def, name));
+            }
+        }
+
+        return void;
+    }
+}
+
 fn MethodType(comptime T: type, comptime name: []const u8) type {
     comptime {
         var Cur = if (isKlassType(T)) T.Class else T;
@@ -1073,9 +1089,9 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
                     if (MT != void) {
                         checkApi(T, I, field.name);
                         @field(val, field.name) = @ptrCast(&getMethod(T, field.name));
-                    } else if (field.default_value) |def_ptr| {
-                        const defval = @as(*align(1) const field.type, @ptrCast(def_ptr)).*;
-                        @field(val, field.name) = defval;
+                    } else if (DefaultMethodType(T, I, field.name) != void) {
+                        checkInterface(I);
+                        @field(val, field.name) = &@field(I.Default(T), field.name);
                     } else {
                         @compileError(compfmt("{s} must implement method '{s}: {}'", .{ @typeName(T), field.name, field.type }));
                     }
@@ -1083,6 +1099,46 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
                 break :blk val;
             };
         }).vt);
+    }
+}
+
+fn checkInterface(comptime I: type) void {
+    comptime {
+        if (!isInterfaceType(I)) @compileError(compfmt("{s} is not Interface.", .{@typeName(I)}));
+        if (@hasDecl(I, "Default")) {
+            const field = @field(I, "Default");
+            switch (@typeInfo(@TypeOf(field))) {
+                else => @compileError("{s}.Default must be: fn (comptime T:type) type"),
+                .Fn => |info| {
+                    if (!info.is_generic or info.return_type != type)
+                        @compileError("{s}.Default must be: fn (comptime T:type) type");
+                },
+            }
+            const methods = I.Default(struct {});
+            if (@typeInfo(methods) != .Struct) {
+                @compileError(compfmt("{s}.Default() must return a struct but:{}", .{ @typeName(I), methods }));
+            }
+            for (std.meta.declarations(methods)) |decl| {
+                if (!@hasDecl(I, decl.name))
+                    @compileError(compfmt("'{s}' is not a '{s}' api but in '{s}.Default'.", .{ decl.name, @typeName(I), @typeName(I) }));
+                const definfo = @typeInfo(@TypeOf(@field(methods, decl.name)));
+                const info = @typeInfo(@TypeOf(@field(I, decl.name)));
+                var fail = false;
+                if (definfo == .Fn and info == .Fn) {
+                    if (definfo.Fn.params.len == info.Fn.params.len and definfo.Fn.params.len > 0) {
+                        for (1..definfo.Fn.params.len) |i| {
+                            if (definfo.Fn.params[i].type != info.Fn.params[i].type) {
+                                fail = true;
+                                break;
+                            }
+                        }
+                    } else fail = true;
+                } else fail = true;
+                if (fail) {
+                    @compileError(compfmt("type missmatch: {s}.{s}, {s}.Default.{s}", .{ @typeName(I), decl.name, @typeName(I), decl.name }));
+                }
+            }
+        }
     }
 }
 
@@ -1243,8 +1299,6 @@ fn isExclude(comptime I: type, comptime method: []const u8) bool {
 
 fn VtableDirect(comptime I: type) type {
     comptime {
-        if (I == IObject) return struct {};
-
         const decls = std.meta.declarations(I);
         var fields: [decls.len]StructField = undefined;
         var idx = 0;

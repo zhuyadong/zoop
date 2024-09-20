@@ -167,6 +167,21 @@ pub const INameAndAge struct {
         return self.ptr == other.ptr;
     }
 }
+
+// 接口还可以提供`api`的缺省实现, 这样申明实现接口的类可以不实现这些接口,
+// 仍然能正确编译和工作 (接口就变成了抽象类)
+pub const IName = struct {
+    ...// 和上面一样
+
+    pub fn Default(comptime Class: type) type {
+        return struct {
+            pub fn getName(_: *Class) []const u8 {
+                return "default name";
+            }
+        }
+    }
+}
+
 ```
 
 ## 实现接口

@@ -174,6 +174,22 @@ pub const INameAndAge struct {
         return self.ptr == other.ptr;
     }
 }
+
+// Interfaces can also provide default implementations of methods,
+// so that classes that declare to implement interfaces can still
+// compile and work correctly without implementing these methods
+// (the interface becomes an abstract class)
+pub const IName = struct {
+    ...// Same as above code
+
+    pub fn Default(comptime Class: type) type {
+        return struct {
+            pub fn getName(_: *Class) []const u8 {
+                return "default name";
+            }
+        }
+    }
+}
 ```
 
 ## Implementing the interface
@@ -181,7 +197,7 @@ pub const INameAndAge struct {
 // We let `Human` implement the `IName` interface
 pub const Human = struct {
     pub const extends = .{IName};
-    ...//Same as above code
+    ...// Same as above code
 };
 
 // Let `SuperMan` implement the `IAge` interface
