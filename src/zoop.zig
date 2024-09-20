@@ -886,14 +886,14 @@ fn ClassInfoGetter(comptime T: type) type {
                 if (isKlassType(T)) {
                     return struct {
                         pub fn get(_: anytype) *const ClassInfo {
-                            return makeClassInfo(T.Class);
+                            return comptime makeClassInfo(T.Class);
                         }
                     };
                 }
                 if (isClassType(T)) {
                     return struct {
                         pub fn get(_: anytype) *const ClassInfo {
-                            return makeClassInfo(T);
+                            return comptime makeClassInfo(T);
                         }
                     };
                 }
@@ -992,7 +992,7 @@ fn classChecker(comptime T: type) *const ClassCheckFunc {
 
         return (struct {
             pub fn func(class_id: type_id) bool {
-                inline for (classes(T).items) |Class| {
+                inline for (comptime classes(T).items) |Class| {
                     if (class_id == comptime makeTypeId(Class)) return true;
                 }
                 return false;

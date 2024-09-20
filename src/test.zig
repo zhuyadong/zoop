@@ -10,7 +10,7 @@ fn assert(b: bool) void {
 
 pub fn main() !void {
     if (zoop.interfaceIndex(IAge, zoop.IObject) == comptime zoop.interfaceIndex(IHuman, zoop.IObject)) {
-        std.debug.print("", .{});
+        std.debug.print("aaaaabbbbbccccc", .{});
     }
     if (false) {
         const s = try zoop.new(allocator, Sub, null);
