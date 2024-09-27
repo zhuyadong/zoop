@@ -129,11 +129,11 @@ pub const IName = struct {
 
     // Define the `getName` interface method
     pub fn getName(self: IHuman) []const u8 {
-        return zoop.ical(self, .getName, .{});
+        return zoop.icall(self, .getName, .{});
     }
     // Define the `setName` interface method
     pub fn setName(self: IHuman, name: []const u8) void {
-        zoop.ical(self, .setName, .{name});
+        zoop.icall(self, .setName, .{name});
     }
     // Don't worry about what `zoop.icall` is, just follow it
 };
@@ -144,10 +144,10 @@ pub const IAge = struct {
     vptr: *anyopaque,
 
     pub fn getAge(self: IHuman) u16 {
-        return zoop.ical(self, .getAge, .{});
+        return zoop.icall(self, .getAge, .{});
     }
     pub fn setAge(self: IHuman, age: u16) void {
-        zoop.ical(self, .setAge, .{age});
+        zoop.icall(self, .setAge, .{age});
     }
 }
 
