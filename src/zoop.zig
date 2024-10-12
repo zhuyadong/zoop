@@ -603,7 +603,7 @@ pub fn upcall(any: anytype, comptime method_enum: MethodEnum(std.meta.Child(@Typ
     return @call(.auto, method, .{ptr} ++ args);
 }
 
-pub fn isRootPtr(ptr: anytype) bool {
+pub inline fn isRootPtr(ptr: anytype) bool {
     const T = comptime std.meta.Child(@TypeOf(ptr));
     if (comptime isClassType(T)) {
         return classInfo(ptr) == comptime makeClassInfo(T);
@@ -705,7 +705,7 @@ pub fn nil(comptime I: type) I {
     return Nil.of(I);
 }
 
-pub fn isNil(any: anytype) bool {
+pub inline fn isNil(any: anytype) bool {
     comptime {
         if (!isInterfaceType(@TypeOf(any))) @compileError(compfmt("'{s}' is not interface", .{@typeName(@TypeOf(any))}));
     }
@@ -713,7 +713,7 @@ pub fn isNil(any: anytype) bool {
 }
 
 //===== private content ======
-fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.builtin.Type.Declaration) bool {
+inline fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.builtin.Type.Declaration) bool {
     comptime {
         @setEvalBranchQuota(5000);
         for (decls) |d| {
@@ -723,7 +723,7 @@ fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.bu
     }
 }
 
-fn isMethod(comptime T: type, comptime name: []const u8) bool {
+inline fn isMethod(comptime T: type, comptime name: []const u8) bool {
     comptime {
         if (@hasDecl(T, name)) {
             const FT = @TypeOf(@field(T, name));
@@ -1185,7 +1185,7 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
     }
 }
 
-pub fn isInterfaceType(comptime T: type) bool {
+pub inline fn isInterfaceType(comptime T: type) bool {
     const fields = comptime @typeInfo(IObject).Struct.fields;
     return comptime blk: {
         switch (@typeInfo(T)) {
@@ -1199,7 +1199,7 @@ pub fn isInterfaceType(comptime T: type) bool {
     };
 }
 
-pub fn isClassType(comptime T: type) bool {
+pub inline fn isClassType(comptime T: type) bool {
     return comptime blk: {
         if (isKlassType(T)) break :blk false;
         if (isInterfaceType(T)) break :blk false;
@@ -1210,7 +1210,7 @@ pub fn isClassType(comptime T: type) bool {
     };
 }
 
-pub fn isKlassType(comptime T: type) bool {
+pub inline fn isKlassType(comptime T: type) bool {
     return comptime blk: {
         if (@typeInfo(T) == .Struct) {
             break :blk @hasDecl(T, "#klass");
@@ -1218,7 +1218,7 @@ pub fn isKlassType(comptime T: type) bool {
     };
 }
 
-pub fn isTuple(any: anytype) bool {
+pub inline fn isTuple(any: anytype) bool {
     return comptime blk: {
         if (@TypeOf(any) == type and @typeInfo(any) == .Struct) {
             if (!@hasDecl(any, "items")) break :blk false;
@@ -1233,7 +1233,7 @@ pub fn isTuple(any: anytype) bool {
     };
 }
 
-pub fn interfaceIndex(comptime T: type, comptime I: type) usize {
+pub inline fn interfaceIndex(comptime T: type, comptime I: type) usize {
     return comptime blk: {
         const ifaces = interfaces(T);
         for (ifaces.items, 0..) |iface, i| {
@@ -1310,7 +1310,7 @@ fn classes(comptime T: type) Tuple {
     }
 }
 
-fn isExclude(comptime I: type, comptime method: []const u8) bool {
+inline fn isExclude(comptime I: type, comptime method: []const u8) bool {
     return comptime blk: {
         if (@hasDecl(I, "excludes")) {
             for (@field(I, "excludes")) |name| {
@@ -1410,6 +1410,6 @@ fn pointerType(any: anytype) enum {
     };
 }
 
-fn canCast(comptime V: type, comptime T: type) bool {
+inline fn canCast(comptime V: type, comptime T: type) bool {
     return comptime Caster(V, T) != void;
 }
