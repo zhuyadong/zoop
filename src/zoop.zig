@@ -1,10 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const StructField = std.builtin.Type.StructField;
-const FieldType = std.meta.FieldType;
 const FieldEnum = std.meta.FieldEnum;
+const Writer = std.Io.Writer;
 const Tuple = type;
-const nameCast = std.enums.nameCast;
 const compfmt = std.fmt.comptimePrint;
 const assert = std.debug.assert;
 const zoop = @This();
@@ -71,17 +70,13 @@ pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
 
-    pub fn formatAny(self: IObject, writer: std.io.AnyWriter) anyerror!void {
-        try icall(self, .formatAny, .{writer});
-    }
-
-    pub fn format(self: *const IObject, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try (self.*).formatAny(if (@TypeOf(writer) == std.io.AnyWriter) writer else writer.any());
+    pub fn format(self: IObject, writer: *Writer) !void {
+        try icall(self, .format, .{writer});
     }
 
     pub fn Default(comptime Class: type) type {
         return struct {
-            pub fn formatAny(self: *Class, writer: std.io.AnyWriter) anyerror!void {
+            pub fn format(self: *Class, writer: *Writer) !void {
                 try writer.print("{}", .{self});
             }
         };
@@ -854,7 +849,7 @@ fn ApiInfo(comptime method: anytype) type {
         return struct {
             pub const Iface = I;
             pub const Return = @typeInfo(@TypeOf(method)).@"fn".return_type orelse void;
-            pub const name = nameCast(ApiEnum(I), method_name);
+            pub const name = @field(ApiEnum(I), method_name);
         };
     }
 }
@@ -1019,7 +1014,7 @@ fn fieldOffset(comptime T: type, comptime name: []const u8, comptime FT: type) u
         var owners = tupleInit(.{});
         for (supers.items) |V| {
             if (@hasField(V, name)) {
-                if (FieldType(V, nameCast(FieldEnum(V), name)) == FT) {
+                if (@FieldType(V, name) == FT) {
                     owners = tupleAppend(owners, V);
                 }
             }
@@ -1183,7 +1178,7 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
     comptime {
         @setEvalBranchQuota(5000);
         const VT = Vtable(I);
-        const vtinfo = @typeInfo(@typeInfo(FieldType(VT, std.enums.nameCast(FieldEnum(VT), field))).pointer.child);
+        const vtinfo = @typeInfo(@typeInfo(@FieldType(VT, field)).pointer.child);
         const tinfo = @typeInfo(MethodType(T, field));
         if (vtinfo.@"fn".return_type.? != tinfo.@"fn".return_type.?) @compileError(compfmt("'{s}.{s}' must return '{}' as same as '{s}.{s}'.", .{ @typeName(T), field, vtinfo.@"fn".return_type.?, @typeName(I), field }));
         if (vtinfo.@"fn".params.len != tinfo.@"fn".params.len) @compileError(compfmt("parameters number of '{s}.{s}' must as same as '{s}.{s}'.", .{ @typeName(T), field, @typeName(I), field }));

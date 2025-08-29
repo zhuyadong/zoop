@@ -411,7 +411,7 @@ test "zoop" {
         try t.expect(zoop.getAllocator(&psubsub.super.super).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(zoop.cast(psubsub, zoop.IObject)).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super.super).?.ptr);
-        std.debug.print("ihuman: {}\n", .{zoop.cast(ihuman, zoop.IObject)});
+        std.debug.print("ihuman: {f}\n", .{zoop.cast(ihuman, zoop.IObject)});
         zoop.destroy(ihuman);
 
         // test getField
