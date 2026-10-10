@@ -282,19 +282,19 @@ Performance notes for `vcall`:
 `vcall` will use `cast` when possible, and `as` otherwise
 
 ## `zoop.IObject.formatAny` for print
-`zoop.IObject` can conveniently output the string content of the object through the `format(...)` mechanism of `std.fmt`.
+`zoop.IObject` can conveniently output the string content of the object through the `{f}` formatting mechanism of `std.fmt`.
 ```zig
 // define a class that implemented `zoop.IObject.formatAny`
 pub const SomeClass = struct {
     name:[]const u8 align(zoop.alignment) = "some";
 
-    pub fn formatAny(self: *SomeClass, writer: std.io.AnyWriter) anyerror!void {
+    pub fn formatAny(self: *SomeClass, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("SomeClass.name = {s}", .{self.name});
     }
 }
 
 // print string from `SomeClass.formatAny` 
 const psome = try zoop.new(t.allocator, SomeClass, null);
-std.debug.print("{}\n", .{zoop.cast(psome, zoop.IObject)});
+std.debug.print("{f}\n", .{zoop.cast(psome, zoop.IObject)});
 // output: SomeClass.name = some
 ```

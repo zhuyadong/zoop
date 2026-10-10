@@ -173,7 +173,7 @@ pub const Human = struct {
         return self.age;
     }
 
-    pub fn formatAny(self: Self, writer: anytype) anyerror!void {
+    pub fn formatAny(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const classinfo = zoop.classInfo(self);
         try writer.print("{s}{{.age = {}, .name='{s}'}}\n", .{ classinfo.typeinfo.typename, self.age, self.name });
     }
@@ -387,7 +387,7 @@ test "zoop" {
         ihuman = zoop.cast(psubsub, IHuman);
         const cpsubsub: *const SubSub = psubsub;
         const cpsub = zoop.cast(cpsubsub, Sub);
-        try t.expect(@typeInfo(@TypeOf(cpsub)).pointer.is_const);
+        try t.expect(@typeInfo(@TypeOf(cpsub)).pointer.attrs.@"const");
         const ksubsub = zoop.Klass(SubSub).from(psubsub);
         try t.expect(@intFromPtr(ihuman.ptr) == @intFromPtr(ksubsub));
         try t.expectEqualStrings(ihuman.getName(), "default");
@@ -397,7 +397,7 @@ test "zoop" {
         const pksubsub: *zoop.Klass(SubSub) = @ptrFromInt(@intFromPtr(pklass));
         try t.expect(@intFromPtr(pklass) == @intFromPtr(pksubsub));
         try t.expect(@intFromPtr(pklass) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
-        try t.expect(pklass.allocator != null);
+        try t.expect(pksubsub.allocator != null);
         try t.expect(@intFromPtr(ihuman.ptr) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
         try t.expect(@intFromPtr(zoop.Klass(Human).from(&psubsub.super.super)) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
         try t.expect(@intFromPtr(zoop.Klass(Sub).from(&psubsub.super)) == @intFromPtr(zoop.Klass(SubSub).from(psubsub)));
@@ -411,7 +411,7 @@ test "zoop" {
         try t.expect(zoop.getAllocator(&psubsub.super.super).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(zoop.cast(psubsub, zoop.IObject)).?.ptr == t.allocator.ptr);
         try t.expect(zoop.getAllocator(psubsub).?.ptr == zoop.getAllocator(&psubsub.super.super).?.ptr);
-        std.debug.print("ihuman: {any}\n", .{zoop.cast(ihuman, zoop.IObject)});
+        std.debug.print("ihuman: {f}\n", .{zoop.cast(ihuman, zoop.IObject)});
         zoop.destroy(ihuman);
 
         // test getField
@@ -419,7 +419,7 @@ test "zoop" {
         const pccustom = &ccustom.class;
         var pfield8 = zoop.getField(pccustom, "age", u8);
         pfield8 = pfield8;
-        try t.expect(@typeInfo(@TypeOf(pfield8)).pointer.is_const);
+        try t.expect(@typeInfo(@TypeOf(pfield8)).pointer.attrs.@"const");
         try t.expect(pfield8.* == 99);
         const pfield16 = zoop.getField(pccustom, "age", u16);
         try t.expect(pfield16.* == 9999);

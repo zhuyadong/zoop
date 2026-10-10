@@ -1,6 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const StructField = std.builtin.Type.StructField;
+const FieldAttributes = std.builtin.Type.Struct.FieldAttributes;
+const FieldInfo = struct {
+    name: [:0]const u8,
+    type: type,
+    attrs: FieldAttributes,
+};
 const FieldEnum = std.meta.FieldEnum;
 const Tuple = type;
 const nameCast = struct {
@@ -74,17 +79,17 @@ pub const IObject = struct {
     ptr: *anyopaque,
     vptr: *anyopaque,
 
-    pub fn formatAny(self: IObject, writer: anytype) anyerror!void {
+    pub fn formatAny(self: IObject, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try icall(self, .formatAny, .{writer});
     }
 
-    pub fn format(self: *const IObject, comptime _: []const u8, _: std.fmt.Options, writer: anytype) !void {
+    pub fn format(self: *const IObject, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try (self.*).formatAny(writer);
     }
 
     pub fn Default(comptime Class: type) type {
         return struct {
-            pub fn formatAny(self: *Class, writer: anytype) anyerror!void {
+            pub fn formatAny(self: *Class, writer: *std.Io.Writer) std.Io.Writer.Error!void {
                 try writer.print("{}", .{self});
             }
         };
@@ -139,9 +144,9 @@ pub fn getMethod(comptime T: type, comptime name: []const u8) MethodType(T, name
                             break :blk @field(Cur, name);
                         }
                     }
-                    const fields = @typeInfo(Cur).@"struct".fields;
-                    if (fields.len > 0 and @typeInfo(fields[0].type) == .@"struct") {
-                        Cur = fields[0].type;
+                    const field_types = @typeInfo(Cur).@"struct".field_types;
+                    if (field_types.len > 0 and @typeInfo(field_types[0]) == .@"struct") {
+                        Cur = field_types[0];
                     } else {
                         Cur = void;
                     }
@@ -159,9 +164,9 @@ pub fn getUpMethod(comptime T: type, comptime name: []const u8) UpMethodType(T, 
 
         const Class = if (isKlassType(T)) T.Class else T;
         const Super = blk: {
-            const fields = @typeInfo(Class).@"struct".fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .@"struct" and isClassType(fields[0].type)) {
-                break :blk fields[0].type;
+            const field_types = @typeInfo(Class).@"struct".field_types;
+            if (field_types.len > 0 and @typeInfo(field_types[0]) == .@"struct" and isClassType(field_types[0])) {
+                break :blk field_types[0];
             } else {
                 break :blk void;
             }
@@ -170,7 +175,7 @@ pub fn getUpMethod(comptime T: type, comptime name: []const u8) UpMethodType(T, 
     }
 }
 
-pub const KlassHeader = if (builtin.mode == .Debug) packed struct {
+pub const KlassHeader = if (builtin.mode == .debug) packed struct {
     const kmagic: u32 = 0xaabbccdd;
     magic: u32 = kmagic,
     info_addr: usize,
@@ -245,7 +250,7 @@ pub fn Klass(comptime T: type) type {
 
             pub fn from(pclass: *const T) *@This() {
                 const self: *@This() = @ptrFromInt(@intFromPtr(pclass) - class_offset);
-                if (comptime builtin.mode == .Debug) {
+                if (comptime builtin.mode == .debug) {
                     assert(self.header.magic == KlassHeader.kmagic);
                 }
                 return self;
@@ -256,7 +261,7 @@ pub fn Klass(comptime T: type) type {
             }
 
             pub fn deinit(self: *@This()) void {
-                if (comptime builtin.mode == .Debug) {
+                if (comptime builtin.mode == .debug) {
                     assert(self.header.magic == KlassHeader.kmagic);
                     assert(self.header.getInfo() == comptime makeClassInfo(T));
                 }
@@ -286,12 +291,12 @@ pub fn ApiEnum(comptime I: type) type {
         if (!isInterfaceType(I)) @compileError(compfmt("{s} is not an interface type.", .{@typeName(I)}));
 
         const decls = std.meta.declarations(I);
-        var apis: [decls.len]std.builtin.Type.Declaration = undefined;
+        var apis: [decls.len][:0]const u8 = undefined;
         var idx = 0;
-        for (std.meta.declarations(I)) |decl| {
-            const info = @typeInfo(@TypeOf(@field(I, decl.name)));
-            if (info == .@"fn" and info.@"fn".params.len > 0 and !info.@"fn".is_generic) {
-                const first = info.@"fn".params[0].type orelse unreachable;
+        for (decls) |decl| {
+            const info = @typeInfo(@TypeOf(@field(I, decl)));
+            if (info == .@"fn" and info.@"fn".param_types.len > 0 and !info.@"fn".is_generic) {
+                const first = info.@"fn".param_types[0] orelse unreachable;
                 const Self = switch (@typeInfo(first)) {
                     else => void,
                     .@"struct" => first,
@@ -313,7 +318,7 @@ pub fn ApiEnum(comptime I: type) type {
         var field_names: [idx][]const u8 = undefined;
         var field_values: [idx]std.math.IntFittingRange(0, idx - 1) = undefined;
         for (0..idx) |i| {
-            field_names[i] = apis[i].name;
+            field_names[i] = apis[i];
             field_values[i] = @intCast(i);
         }
         return @Enum(std.math.IntFittingRange(0, idx - 1), .exhaustive, &field_names, &field_values);
@@ -332,13 +337,13 @@ pub fn MethodEnum(comptime T: type) type {
             }
             break :blk n;
         };
-        var methods: [count]std.builtin.Type.Declaration = undefined;
+        var methods: [count][:0]const u8 = undefined;
         var idx = 0;
         for (supers.items) |super| {
             for (std.meta.declarations(super)) |decl| {
-                const info = @typeInfo(@TypeOf(@field(super, decl.name)));
-                if (info == .@"fn" and info.@"fn".params.len > 0 and !info.@"fn".is_generic) {
-                    const first = info.@"fn".params[0].type.?;
+                const info = @typeInfo(@TypeOf(@field(super, decl)));
+                if (info == .@"fn" and info.@"fn".param_types.len > 0 and !info.@"fn".is_generic) {
+                    const first = info.@"fn".param_types[0].?;
                     const Self = switch (@typeInfo(first)) {
                         else => void,
                         .@"struct" => first,
@@ -359,7 +364,7 @@ pub fn MethodEnum(comptime T: type) type {
         var field_names: [idx][]const u8 = undefined;
         var field_values: [idx]std.math.IntFittingRange(0, idx - 1) = undefined;
         for (0..idx) |i| {
-            field_names[i] = methods[i].name;
+            field_names[i] = methods[i];
             field_values[i] = @intCast(i);
         }
         return @Enum(std.math.IntFittingRange(0, idx - 1), .exhaustive, &field_names, &field_values);
@@ -378,45 +383,35 @@ pub fn Vtable(comptime I: type) type {
         @setEvalBranchQuota(20000);
         for (ifaces.items, 0..) |iface, i| {
             vtables[i] = VtableDirect(iface);
-            nfield += @typeInfo(vtables[i]).@"struct".fields.len;
+            nfield += @typeInfo(vtables[i]).@"struct".field_names.len;
         }
 
-        var allfields: [nfield]StructField = undefined;
+        var names: [nfield][]const u8 = undefined;
+        var types: [nfield]type = undefined;
+        var attrs: [nfield]FieldAttributes = undefined;
         var idx: comptime_int = 0;
         for (ifaces.items) |iface| {
             if (iface != I) {
-                allfields[idx] = StructField{
-                    .alignment = @alignOf(*Vtable(iface)),
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .name = @typeName(iface),
-                    .type = *Vtable(iface),
+                names[idx] = @typeName(iface);
+                types[idx] = *Vtable(iface);
+                attrs[idx] = .{
+                    .@"align" = @alignOf(*Vtable(iface)),
                 };
                 idx += 1;
             }
         }
         for (vtables) |vt| {
-            const fields = @typeInfo(vt).@"struct".fields;
+            const info = @typeInfo(vt).@"struct";
             @setEvalBranchQuota(10000);
-            for (fields) |field| {
-                allfields[idx] = field;
+            for (info.field_names, info.field_types, info.field_attrs) |name, FT, attr| {
+                names[idx] = name;
+                types[idx] = FT;
+                attrs[idx] = attr;
                 idx += 1;
             }
         }
         const field_count = idx;
-        var names: [field_count][]const u8 = undefined;
-        var types: [field_count]type = undefined;
-        var attrs: [field_count]std.builtin.Type.StructField.Attributes = undefined;
-        for (0..field_count) |i| {
-            names[i] = allfields[i].name;
-            types[i] = allfields[i].type;
-            attrs[i] = .{
-                .@"align" = allfields[i].alignment,
-                .@"comptime" = allfields[i].is_comptime,
-                .default_value_ptr = allfields[i].default_value_ptr,
-            };
-        }
-        return @Struct(.auto, null, &names, &types, &attrs);
+        return @Struct(.auto, null, names[0..field_count], types[0..field_count], attrs[0..field_count]);
     }
 }
 
@@ -598,7 +593,7 @@ pub fn upcall(any: anytype, comptime method_enum: MethodEnum(std.meta.Child(@Typ
     const T = comptime std.meta.Child(@TypeOf(any));
     const Class = comptime if (isKlassType(T)) T.Class else T;
     const method = comptime getUpMethod(Class, @tagName(method_enum));
-    const Ptr = comptime @typeInfo(@TypeOf(method)).@"fn".params[0].type.?;
+    const Ptr = comptime @typeInfo(@TypeOf(method)).@"fn".param_types[0].?;
     const ptr: Ptr = @ptrCast(if (comptime isKlassType(T)) &any.class else any);
     return @call(.auto, method, .{ptr} ++ args);
 }
@@ -713,11 +708,11 @@ pub inline fn isNil(any: anytype) bool {
 }
 
 //===== private content ======
-inline fn hasDecl(comptime decls: []std.builtin.Type.Declaration, comptime decl: std.builtin.Type.Declaration) bool {
+inline fn hasDecl(comptime decls: []const [:0]const u8, comptime decl: [:0]const u8) bool {
     comptime {
         @setEvalBranchQuota(5000);
         for (decls) |d| {
-            if (std.mem.eql(u8, d.name, decl.name)) return true;
+            if (std.mem.eql(u8, d, decl)) return true;
         }
         return false;
     }
@@ -730,8 +725,8 @@ inline fn isMethod(comptime T: type, comptime name: []const u8) bool {
             switch (@typeInfo(FT)) {
                 else => {},
                 .@"fn" => |f| {
-                    if (f.params.len > 0) {
-                        return RealType(f.params[0].type.?) == T;
+                    if (f.param_types.len > 0) {
+                        return RealType(f.param_types[0].?) == T;
                     }
                 },
             }
@@ -792,9 +787,9 @@ fn MethodType(comptime T: type, comptime name: []const u8) type {
         while (Cur != void) {
             if (isMethod(Cur, name)) return @TypeOf(@field(Cur, name));
 
-            const fields = @typeInfo(Cur).@"struct".fields;
-            if (fields.len > 0 and isClassType(RealType(fields[0].type))) {
-                Cur = fields[0].type;
+            const field_types = @typeInfo(Cur).@"struct".field_types;
+            if (field_types.len > 0 and isClassType(RealType(field_types[0]))) {
+                Cur = field_types[0];
             } else {
                 Cur = void;
             }
@@ -807,9 +802,9 @@ fn UpMethodType(comptime T: type, comptime name: []const u8) type {
     comptime {
         const Class = if (isKlassType(T)) T.Class else T;
         const Super = blk: {
-            const fields = @typeInfo(Class).@"struct".fields;
-            if (fields.len > 0 and @typeInfo(fields[0].type) == .@"struct" and isClassType(fields[0].type)) {
-                break :blk fields[0].type;
+            const field_types = @typeInfo(Class).@"struct".field_types;
+            if (field_types.len > 0 and @typeInfo(field_types[0]) == .@"struct" and isClassType(field_types[0])) {
+                break :blk field_types[0];
             } else {
                 break :blk void;
             }
@@ -829,15 +824,15 @@ fn ApiInfo(comptime method: anytype) type {
     comptime {
         const info = @typeInfo(@TypeOf(method));
         if (info != .@"fn") @compileError("method is not a .fn");
-        if (info.@"fn".params.len == 0 or !isInterfaceType(info.@"fn".params[0].type.?))
-            @compileError(compfmt("{s} is not an interface type.", .{@typeName(info.@"fn".params[0].type.?)}));
+        if (info.@"fn".param_types.len == 0 or !isInterfaceType(info.@"fn".param_types[0].?))
+            @compileError(compfmt("{s} is not an interface type.", .{@typeName(info.@"fn".param_types[0].?)}));
 
-        const I = info.@"fn".params[0].type orelse unreachable;
+        const I = info.@"fn".param_types[0] orelse unreachable;
         const method_name = blk: {
             for (std.meta.declarations(I)) |decl| {
-                if (@TypeOf(@field(I, decl.name)) == @TypeOf(method)) {
-                    if (@field(I, decl.name) == method)
-                        break :blk decl.name;
+                if (@TypeOf(@field(I, decl)) == @TypeOf(method)) {
+                    if (@field(I, decl) == method)
+                        break :blk decl;
                 }
             }
             unreachable;
@@ -971,14 +966,14 @@ fn ClassInfoGetter(comptime T: type) type {
     }
 }
 
-fn defaultFields(comptime T: type) []StructField {
+fn defaultFields(comptime T: type) []const FieldInfo {
     comptime {
-        const allfields = std.meta.fields(T);
-        var fields: [allfields.len]StructField = undefined;
+        const info = @typeInfo(T).@"struct";
+        var fields: [info.field_names.len]FieldInfo = undefined;
         var idx = 0;
-        for (allfields) |field| {
-            if (field.default_value_ptr != null) {
-                fields[idx] = field;
+        for (info.field_names, info.field_types, info.field_attrs) |name, FT, attrs| {
+            if (attrs.default_value_ptr != null) {
+                fields[idx] = .{ .name = name, .type = FT, .attrs = attrs };
                 idx += 1;
             }
         }
@@ -990,7 +985,7 @@ fn defaultFields(comptime T: type) []StructField {
 fn initDefaultFields(pclass: anytype) void {
     const T = comptime std.meta.Child(@TypeOf(pclass));
     inline for (comptime defaultFields(T)) |field| {
-        const ptr: *const field.type = @ptrCast(@alignCast(field.default_value_ptr.?));
+        const ptr: *const field.type = @ptrCast(@alignCast(field.attrs.default_value_ptr.?));
         @field(pclass, field.name) = ptr.*;
     }
 }
@@ -1111,16 +1106,16 @@ fn makeVtable(comptime T: type, comptime I: type) *anyopaque {
                         @field(val, @typeName(iface)) = @ptrCast(@alignCast(makeVtable(T, iface)));
                     }
                 }
-                for (std.meta.fields(VT)[nsuper..]) |field| {
-                    const MT = MethodType(T, field.name);
+                for (std.meta.fieldNames(VT)[nsuper..], std.meta.fieldTypes(VT)[nsuper..]) |field_name, field_type| {
+                    const MT = MethodType(T, field_name);
                     if (MT != void) {
-                        checkApi(T, I, field.name);
-                        @field(val, field.name) = @ptrCast(&getMethod(T, field.name));
-                    } else if (DefaultMethodType(T, I, field.name) != void) {
+                        checkApi(T, I, field_name);
+                        @field(val, field_name) = @ptrCast(&getMethod(T, field_name));
+                    } else if (DefaultMethodType(T, I, field_name) != void) {
                         checkInterface(I);
-                        @field(val, field.name) = @ptrCast(&defaultMethod(T, I, field.name));
+                        @field(val, field_name) = @ptrCast(&defaultMethod(T, I, field_name));
                     } else {
-                        @compileError(compfmt("{s} must implement method '{s}: {}'", .{ @typeName(T), field.name, field.type }));
+                        @compileError(compfmt("{s} must implement method '{s}: {}'", .{ @typeName(T), field_name, field_type }));
                     }
                 }
                 break :blk val;
@@ -1146,15 +1141,15 @@ fn checkInterface(comptime I: type) void {
                 @compileError(compfmt("{s}.Default() must return a struct but:{}", .{ @typeName(I), methods }));
             }
             for (std.meta.declarations(methods)) |decl| {
-                if (!@hasDecl(I, decl.name))
-                    @compileError(compfmt("'{s}' is not a '{s}' api but in '{s}.Default'.", .{ decl.name, @typeName(I), @typeName(I) }));
-                const definfo = @typeInfo(@TypeOf(@field(methods, decl.name)));
-                const info = @typeInfo(@TypeOf(@field(I, decl.name)));
+                if (!@hasDecl(I, decl))
+                    @compileError(compfmt("'{s}' is not a '{s}' api but in '{s}.Default'.", .{ decl, @typeName(I), @typeName(I) }));
+                const definfo = @typeInfo(@TypeOf(@field(methods, decl)));
+                const info = @typeInfo(@TypeOf(@field(I, decl)));
                 var fail = false;
                 if (definfo == .@"fn" and info == .@"fn") {
-                    if (definfo.@"fn".params.len == info.@"fn".params.len and definfo.@"fn".params.len > 0) {
-                        for (1..definfo.@"fn".params.len) |i| {
-                            if (definfo.@"fn".params[i].type != info.@"fn".params[i].type) {
+                    if (definfo.@"fn".param_types.len == info.@"fn".param_types.len and definfo.@"fn".param_types.len > 0) {
+                        for (1..definfo.@"fn".param_types.len) |i| {
+                            if (definfo.@"fn".param_types[i] != info.@"fn".param_types[i]) {
                                 fail = true;
                                 break;
                             }
@@ -1162,7 +1157,7 @@ fn checkInterface(comptime I: type) void {
                     } else fail = true;
                 } else fail = true;
                 if (fail) {
-                    @compileError(compfmt("type missmatch: {s}.{s}, {s}.Default.{s}", .{ @typeName(I), decl.name, @typeName(I), decl.name }));
+                    @compileError(compfmt("type missmatch: {s}.{s}, {s}.Default.{s}", .{ @typeName(I), decl, @typeName(I), decl }));
                 }
             }
         }
@@ -1177,28 +1172,29 @@ fn checkApi(comptime T: type, comptime I: type, comptime field: []const u8) void
         const vtinfo = @typeInfo(@typeInfo(@FieldType(VT, field)).pointer.child);
         const tinfo = @typeInfo(MethodType(T, field));
         if (vtinfo.@"fn".return_type.? != tinfo.@"fn".return_type.?) @compileError(compfmt("'{s}.{s}' must return '{}' as same as '{s}.{s}'.", .{ @typeName(T), field, vtinfo.@"fn".return_type.?, @typeName(I), field }));
-        if (vtinfo.@"fn".params.len != tinfo.@"fn".params.len) @compileError(compfmt("parameters number of '{s}.{s}' must as same as '{s}.{s}'.", .{ @typeName(T), field, @typeName(I), field }));
-        if (vtinfo.@"fn".params.len < 2) return;
-        for (vtinfo.@"fn".params[1..], tinfo.@"fn".params[1..], 1..) |vt, t, i| {
+        if (vtinfo.@"fn".param_types.len != tinfo.@"fn".param_types.len) @compileError(compfmt("parameters number of '{s}.{s}' must as same as '{s}.{s}'.", .{ @typeName(T), field, @typeName(I), field }));
+        if (vtinfo.@"fn".param_types.len < 2) return;
+        for (vtinfo.@"fn".param_types[1..], tinfo.@"fn".param_types[1..], 1..) |vt, t, i| {
             const idx = i;
-            if (vt.type.? != t.type.?) {
-                @compileError(compfmt("The {d}th parameter of {s}.{s} must be '{}'.", .{ idx + 1, @typeName(T), field, vt.type.? }));
+            if (vt.? != t.?) {
+                @compileError(compfmt("The {d}th parameter of {s}.{s} must be '{}'.", .{ idx + 1, @typeName(T), field, vt.? }));
             }
         }
     }
 }
 
 pub inline fn isInterfaceType(comptime T: type) bool {
-    const fields = comptime @typeInfo(IObject).@"struct".fields;
+    const field_names = comptime @typeInfo(IObject).@"struct".field_names;
+    const field_types = comptime @typeInfo(IObject).@"struct".field_types;
     return comptime blk: {
         @setEvalBranchQuota(8000);
         switch (@typeInfo(T)) {
             else => break :blk false,
-            .@"struct" => |s| break :blk s.fields.len == fields.len and
-                s.fields[0].type == fields[0].type and
-                s.fields[1].type == fields[1].type and
-                std.mem.eql(u8, s.fields[0].name, fields[0].name) and
-                std.mem.eql(u8, s.fields[1].name, fields[1].name),
+            .@"struct" => |s| break :blk s.field_names.len == field_names.len and
+                s.field_types[0] == field_types[0] and
+                s.field_types[1] == field_types[1] and
+                std.mem.eql(u8, s.field_names[0], field_names[0]) and
+                std.mem.eql(u8, s.field_names[1], field_names[1]),
         }
     };
 }
@@ -1209,7 +1205,7 @@ pub inline fn isClassType(comptime T: type) bool {
         if (isInterfaceType(T)) break :blk false;
         break :blk switch (@typeInfo(T)) {
             else => false,
-            .@"struct" => |s| !s.is_tuple and s.fields.len > 0 and s.fields[0].alignment == alignment,
+            .@"struct" => |s| !s.is_tuple and s.field_types.len > 0 and s.field_attrs[0].@"align" == alignment,
         };
     };
 }
@@ -1269,9 +1265,9 @@ fn interfaces(comptime T: type) Tuple {
             }
             ret = tupleAppendUnique(ret, T);
         } else if (isClassType(T)) {
-            const fields = std.meta.fields(T);
-            if (fields.len > 0 and isClassType(fields[0].type)) {
-                ret = tupleAppendUnique(ret, interfaces(fields[0].type));
+            const field_types = @typeInfo(T).@"struct".field_types;
+            if (field_types.len > 0 and isClassType(field_types[0])) {
+                ret = tupleAppendUnique(ret, interfaces(field_types[0]));
             }
             if (@hasDecl(T, "extends")) {
                 const extends = @field(T, "extends");
@@ -1302,9 +1298,9 @@ fn classes(comptime T: type) Tuple {
         var Cur = T;
         while (Cur != void) {
             ret = tupleAppend(ret, Cur);
-            const fields = std.meta.fields(Cur);
-            if (fields.len > 0 and isClassType(fields[0].type)) {
-                Cur = fields[0].type;
+            const field_types = @typeInfo(Cur).@"struct".field_types;
+            if (field_types.len > 0 and isClassType(field_types[0])) {
+                Cur = field_types[0];
             } else {
                 Cur = void;
             }
@@ -1329,21 +1325,22 @@ inline fn isExclude(comptime I: type, comptime method: []const u8) bool {
 fn VtableDirect(comptime I: type) type {
     comptime {
         const decls = std.meta.declarations(I);
-        var fields: [decls.len]StructField = undefined;
+        var names: [decls.len][]const u8 = undefined;
+        var types: [decls.len]type = undefined;
+        var attrs: [decls.len]FieldAttributes = undefined;
         var idx = 0;
         @setEvalBranchQuota(7000);
         for (decls) |decl| {
-            if (!isExclude(I, decl.name)) {
-                const info = @typeInfo(@TypeOf(@field(I, decl.name)));
+            if (!isExclude(I, decl)) {
+                const info = @typeInfo(@TypeOf(@field(I, decl)));
                 switch (info) {
                     .@"fn" => |f| {
-                        if (!f.is_generic and f.params.len > 0 and f.params[0].type == I) {
-                            fields[idx] = StructField{
-                                .alignment = @alignOf(VtableFieldType(f)),
-                                .default_value_ptr = null,
-                                .is_comptime = false,
-                                .name = decl.name,
-                                .type = VtableFieldType(f),
+                        if (!f.is_generic and f.param_types.len > 0 and f.param_types[0] == I) {
+                            const FT = VtableFieldType(f);
+                            names[idx] = decl;
+                            types[idx] = FT;
+                            attrs[idx] = .{
+                                .@"align" = @alignOf(FT),
                             };
                             idx += 1;
                         }
@@ -1353,34 +1350,22 @@ fn VtableDirect(comptime I: type) type {
             }
         }
         const field_count = idx;
-        var names: [field_count][]const u8 = undefined;
-        var types: [field_count]type = undefined;
-        var attrs: [field_count]std.builtin.Type.StructField.Attributes = undefined;
-        for (0..field_count) |i| {
-            names[i] = fields[i].name;
-            types[i] = fields[i].type;
-            attrs[i] = .{
-                .@"align" = fields[i].alignment,
-                .@"comptime" = fields[i].is_comptime,
-                .default_value_ptr = fields[i].default_value_ptr,
-            };
-        }
-        return @Struct(.auto, null, &names, &types, &attrs);
+        return @Struct(.auto, null, names[0..field_count], types[0..field_count], attrs[0..field_count]);
     }
 }
 
 fn VtableFieldType(comptime F: std.builtin.Type.Fn) type {
     comptime {
-        var param_types: [F.params.len]type = undefined;
-        var param_attrs: [F.params.len]std.builtin.Type.Fn.Param.Attributes = undefined;
+        var param_types: [F.param_types.len]type = undefined;
+        var param_attrs: [F.param_types.len]std.builtin.Type.Fn.ParamAttributes = undefined;
         param_types[0] = *anyopaque;
         param_attrs[0] = .{
-            .@"noalias" = F.params[0].is_noalias,
+            .@"noalias" = F.param_attrs[0].@"noalias",
         };
-        for (1..F.params.len) |i| {
-            param_types[i] = F.params[i].type orelse anyopaque;
+        for (1..F.param_types.len) |i| {
+            param_types[i] = F.param_types[i] orelse anyopaque;
             param_attrs[i] = .{
-                .@"noalias" = F.params[i].is_noalias,
+                .@"noalias" = F.param_attrs[i].@"noalias",
             };
         }
         return *const @Fn(
@@ -1388,8 +1373,8 @@ fn VtableFieldType(comptime F: std.builtin.Type.Fn) type {
             &param_attrs,
             F.return_type orelse void,
             .{
-                .@"callconv" = F.calling_convention,
-                .varargs = F.is_var_args,
+                .@"callconv" = F.attrs.@"callconv",
+                .varargs = F.attrs.varargs,
             },
         );
     }
@@ -1422,7 +1407,7 @@ fn pointerType(any: anytype) enum {
         };
         break :blk switch (@typeInfo(T)) {
             else => .none,
-            .pointer => |p| if (p.is_const) .read else .write,
+            .pointer => |p| if (p.attrs.@"const") .read else .write,
         };
     };
 }
